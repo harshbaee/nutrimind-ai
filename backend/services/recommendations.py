@@ -46,7 +46,7 @@ def estimate_serving_savings(source: Product, suggested: Product) -> float:
 
 def weekly_meals(db: Session, user_id: int) -> list[Meal]:
     today = datetime.now().date()
-    week_start = datetime.combine(today - timedelta(days=7), time.min)
+    week_start = datetime.combine(today - timedelta(days=6), time.min)
     return db.query(Meal).filter(Meal.user_id == user_id, Meal.logged_at >= week_start).all()
 
 

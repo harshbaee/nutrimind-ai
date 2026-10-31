@@ -62,7 +62,7 @@ def meal_type_breakdown(user_id: int, db: Session = Depends(get_db)):
 def weekly_summary(user_id: int, db: Session = Depends(get_db)):
     from datetime import date, datetime, time, timedelta
     today = date.today()
-    week_ago = today - timedelta(days=7)
+    week_ago = today - timedelta(days=6)  # today + 6 previous days = 7 days, matching the weekly budget
     week_start = datetime.combine(week_ago, time.min)
     user = db.query(User).filter(User.id == user_id).first()
     meals = db.query(Meal).filter(

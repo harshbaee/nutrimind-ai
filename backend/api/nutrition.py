@@ -6,6 +6,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database.database import get_db
 from models.models import Product, Meal, User
 from schemas import DailySummary
+from services.recommendations import cost_per_100g
 
 router = APIRouter()
 
@@ -14,12 +15,14 @@ def product_efficiency(product_id: int, db: Session = Depends(get_db)):
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    price = float(product.estimated_price_eur or 1)
+    # Price is for the whole pack (serving_size_g), so scores use the cost of 100g.
+    cost = cost_per_100g(product)
+    price = float(product.estimated_price_eur or 0)
     protein = float(product.protein_per_100g or 0)
     calories = float(product.calories_per_100g or 0)
-    pes = round(protein / price, 2) if price > 0 else 0
-    cpe = round(calories / price, 2) if price > 0 else 0
-    nutrition_score = round((protein * 4 + (calories - protein * 4) * 0.5) / max(price, 0.01), 2)
+    pes = round(protein / cost, 2) if cost else 0
+    cpe = round(calories / cost, 2) if cost else 0
+    nutrition_score = round((protein * 4 + (calories - protein * 4) * 0.5) / cost, 2) if cost else 0
     return {
         "product_id": product_id,
         "name": product.name,
@@ -65,17 +68,17 @@ def efficiency_rankings(db: Session = Depends(get_db)):
     products = db.query(Product).filter(Product.estimated_price_eur.isnot(None)).all()
     rankings = []
     for p in products:
-        price = float(p.estimated_price_eur or 1)
+        cost = cost_per_100g(p)
         protein = float(p.protein_per_100g or 0)
         calories = float(p.calories_per_100g or 0)
-        if price > 0:
+        if cost:
             rankings.append({
                 "id": p.id, "name": p.name, "brand": p.brand,
-                "protein_efficiency_score": round(protein / price, 2),
-                "calories_per_euro": round(calories / price, 2),
+                "protein_efficiency_score": round(protein / cost, 2),
+                "calories_per_euro": round(calories / cost, 2),
                 "protein_per_100g": protein,
                 "calories_per_100g": calories,
-                "price_eur": price
+                "price_eur": float(p.estimated_price_eur)
             })
     rankings.sort(key=lambda x: x["protein_efficiency_score"], reverse=True)
     return {"rankings": rankings[:20]}

@@ -2,6 +2,7 @@
 import os
 import sys
 import tempfile
+from datetime import date, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Must be set before the database module is imported.
@@ -10,6 +11,7 @@ os.environ["DATABASE_URL"] = "sqlite:///" + os.path.join(tempfile.mkdtemp(), "te
 import pytest
 from fastapi.testclient import TestClient
 
+from api.food import parse_product
 from database import seed_demo
 from main import app
 
@@ -76,3 +78,29 @@ def test_recommendations_generate():
 def test_coach_answers_question():
     res = client.post("/coach/ask?days=30", json={"user_id": USER_ID, "question": "How can I improve protein?"})
     assert res.status_code == 200
+
+
+def test_rankings_use_cost_per_100g():
+    rankings = client.get("/nutrition/rankings").json()["rankings"]
+    # Rolled Oats 1kg at EUR 1.59 -> 16.9g protein / EUR 0.159 per 100g
+    assert rankings[0]["name"] == "Rolled Oats 1kg"
+    assert rankings[0]["protein_efficiency_score"] == pytest.approx(16.9 / 0.159, abs=0.01)
+    scores = [r["protein_efficiency_score"] for r in rankings]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_search_result_uses_pack_size_not_serving():
+    assert parse_product({"product_quantity": "750", "serving_quantity": 30})["serving_size_g"] == 750
+    assert parse_product({"product_quantity": "abc", "serving_quantity": 30})["serving_size_g"] is None
+    assert parse_product({"product_quantity": 25000})["serving_size_g"] is None
+
+
+def test_weekly_summary_covers_seven_days():
+    week = client.get(f"/analytics/weekly-summary/{USER_ID}").json()
+    assert date.fromisoformat(week["week_start"]) == date.today() - timedelta(days=6)
+
+
+def test_oversized_inputs_are_rejected():
+    meal = {"user_id": USER_ID, "name": "Huge", "meal_type": "lunch", "items": [{"product_id": 2, "quantity_g": 5001}]}
+    assert client.post("/meals/log", json=meal).status_code == 422
+    assert client.patch("/food/2/price", json={"estimated_price_eur": 1, "serving_size_g": 10000}).status_code == 422

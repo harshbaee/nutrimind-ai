@@ -54,7 +54,7 @@ export function SavedProductsTable() {
                 <TableHead className="h-9">Category</TableHead>
                 <TableHead className="h-9 text-right">kcal/100g</TableHead>
                 <TableHead className="h-9 text-right text-emerald-700">P/100g</TableHead>
-                <TableHead className="h-9 text-right">Serving</TableHead>
+                <TableHead className="h-9 text-right">Pack size</TableHead>
                 <TableHead className="h-9 text-right">Price</TableHead>
                 <TableHead className="h-9 w-[60px]"></TableHead>
               </TableRow>

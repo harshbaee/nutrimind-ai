@@ -20,6 +20,15 @@ API = openfoodfacts.API(
     environment=openfoodfacts.Environment.org,  # use .net for staging
 )
 
+def pack_size_g(item: dict) -> float | None:
+    # serving_size_g is the amount the price buys, so use the pack size, not OFF's serving_quantity.
+    try:
+        grams = float(item.get("product_quantity"))
+    except (TypeError, ValueError):
+        return None
+    return grams if 0 < grams < 10000 else None
+
+
 def parse_product(item: dict) -> dict:
     nutriments = item.get("nutriments", {})
     return {
@@ -30,7 +39,7 @@ def parse_product(item: dict) -> dict:
         "protein_per_100g": nutriments.get("proteins_100g"),
         "carbs_per_100g": nutriments.get("carbohydrates_100g"),
         "fat_per_100g": nutriments.get("fat_100g"),
-        "serving_size_g": item.get("serving_quantity"),
+        "serving_size_g": pack_size_g(item),
         "category": (item.get("categories", "") or "").split(",")[0].strip(),
         "nutriscore": item.get("nutriscore_grade"),
         "nova_group": item.get("nova_group"),
@@ -92,7 +101,7 @@ def get_by_barcode(barcode: str, db: Session = Depends(get_db)):
     try:
         result = API.product.get(barcode, fields=[
             "code", "product_name", "brands", "nutriments",
-            "serving_quantity", "categories", "nutriscore_grade", "nova_group"
+            "product_quantity", "categories", "nutriscore_grade", "nova_group"
         ])
         if not result or result.get("status") == 0:
             raise HTTPException(status_code=404, detail="Product not found")

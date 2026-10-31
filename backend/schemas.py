@@ -41,7 +41,7 @@ class ProductBase(BaseModel):
     protein_per_100g: Optional[float] = Field(default=None, ge=0)
     carbs_per_100g: Optional[float] = Field(default=None, ge=0)
     fat_per_100g: Optional[float] = Field(default=None, ge=0)
-    serving_size_g: Optional[float] = Field(default=None, gt=0)
+    serving_size_g: Optional[float] = Field(default=None, gt=0, lt=10000)  # column is Numeric(6,2)
     estimated_price_eur: Optional[float] = Field(default=None, ge=0)
     category: Optional[str] = Field(default=None, max_length=100)
 
@@ -58,14 +58,14 @@ class ProductUpdate(BaseModel):
     protein_per_100g: Optional[float] = Field(default=None, ge=0)
     carbs_per_100g: Optional[float] = Field(default=None, ge=0)
     fat_per_100g: Optional[float] = Field(default=None, ge=0)
-    serving_size_g: Optional[float] = Field(default=None, gt=0)
+    serving_size_g: Optional[float] = Field(default=None, gt=0, lt=10000)  # column is Numeric(6,2)
     estimated_price_eur: Optional[float] = Field(default=None, ge=0)
     category: Optional[str] = Field(default=None, max_length=100)
 
 
 class ProductPriceUpdate(BaseModel):
     estimated_price_eur: float = Field(ge=0)
-    serving_size_g: Optional[float] = Field(default=None, gt=0)
+    serving_size_g: Optional[float] = Field(default=None, gt=0, lt=10000)  # column is Numeric(6,2)
 
 
 class ProductResponse(ProductBase):
@@ -77,7 +77,7 @@ class ProductResponse(ProductBase):
 
 class FoodLogItemCreate(BaseModel):
     product_id: int
-    quantity_g: float = Field(gt=0)
+    quantity_g: float = Field(gt=0, le=5000)
 
 
 class MealCreate(BaseModel):
