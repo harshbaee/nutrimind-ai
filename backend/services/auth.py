@@ -80,6 +80,13 @@ def end_session(db: Session, token: str) -> None:
     db.commit()
 
 
+def end_other_sessions(db: Session, user: User, keep_token: str) -> None:
+    db.query(AuthSession).filter(
+        AuthSession.user_id == user.id, AuthSession.token_hash != _token_hash(keep_token)
+    ).delete(synchronize_session=False)
+    db.commit()
+
+
 bearer = HTTPBearer(auto_error=False)  # also adds the "Authorize" button to /docs
 
 

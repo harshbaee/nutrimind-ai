@@ -320,3 +320,28 @@ def test_each_account_has_its_own_pantry():
     assert copy["message"] == "Product saved" and copy["id"] != demo_food["id"]
     assert client.get(f"/food/{demo_food['id']}").json()["estimated_price_eur"] == demo_food["estimated_price_eur"]
     assert [p["id"] for p in pat.get("/food/saved").json()] == [copy["id"]]
+
+
+def test_change_password_needs_the_current_one_and_ends_other_logins():
+    kim, _ = sign_up("kim@example.com", "first password")
+    laptop = TestClient(app)
+    laptop.headers["Authorization"] = "Bearer " + laptop.post("/auth/login", json={"email": "kim@example.com", "password": "first password"}).json()["token"]
+
+    assert kim.post("/auth/password", json={"current_password": "wrong", "new_password": "second password"}).status_code == 400
+    assert kim.post("/auth/password", json={"current_password": "first password", "new_password": "short"}).status_code == 422
+    assert kim.post("/auth/password", json={"current_password": "first password", "new_password": "second password"}).status_code == 204
+
+    assert kim.get("/auth/me").status_code == 200  # the session that changed it stays logged in
+    assert laptop.get("/auth/me").status_code == 401  # every other session is logged out
+    old = {"email": "kim@example.com", "password": "first password"}
+    new = {"email": "kim@example.com", "password": "second password"}
+    assert client.post("/auth/login", json=old).status_code == 401
+    assert client.post("/auth/login", json=new).status_code == 200
+
+
+def test_goals_and_budget_can_be_updated():
+    lee, lee_id = sign_up("lee@example.com")
+    res = lee.patch(f"/users/{lee_id}", json={"calorie_goal": 2600, "protein_goal": 180, "budget_weekly": 70})
+    assert res.status_code == 200
+    assert (res.json()["calorie_goal"], res.json()["protein_goal"], res.json()["budget_weekly"]) == (2600, 180, 70)
+    assert lee.patch(f"/users/{USER_ID}", json={"calorie_goal": 1}).status_code == 403

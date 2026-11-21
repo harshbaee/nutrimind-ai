@@ -453,6 +453,10 @@ export const api = {
     request<AuthResponse>("/auth/login", { method: "POST", body: JSON.stringify(body) }),
   logOut: () => request<void>("/auth/logout", { method: "POST" }),
   me: () => request<User>("/auth/me"),
+  changePassword: (body: { current_password: string; new_password: string }) =>
+    request<void>("/auth/password", { method: "POST", body: JSON.stringify(body) }),
+  updateUser: (userId: number, body: Partial<Omit<User, "id" | "created_at">>) =>
+    request<User>(`/users/${userId}`, { method: "PATCH", body: JSON.stringify(body) }),
   barcode: (code: string) => request<FoodSearchResult>(`/food/barcode/${encodeURIComponent(code)}`),
   repeatMeal: (mealId: number) => request<unknown>(`/meals/${mealId}/repeat`, { method: "POST" }),
   shoppingList: (userId: number) => request<ShoppingList>(`/analytics/shopping-list/${userId}`),

@@ -12,6 +12,7 @@ import { Pantry } from "@/components/app/Pantry";
 import { Progress } from "@/components/app/Progress";
 import { LogMeal } from "@/components/app/LogMeal";
 import { Auth } from "@/components/app/Auth";
+import { Settings } from "@/components/app/Settings";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -48,6 +49,7 @@ function App() {
   const userId = user?.id;
   const [screen, setScreen] = useState<Screen>("today");
   const logDialog = useRef<HTMLDialogElement>(null);
+  const settingsDialog = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     setToken(authToken.get());
@@ -131,8 +133,8 @@ function App() {
         </nav>
         {user ? (
           <div className="na-right">
-            <button type="button" className="na-profile" onClick={logOut} title={`Logged in as ${user.email}`}>
-              {user.name} · Log out
+            <button type="button" className="na-profile" onClick={() => settingsDialog.current?.showModal()} title="Your account">
+              {user.name}
             </button>
             <button type="button" className="np-btn" onClick={openLog}>Log a meal</button>
           </div>
@@ -159,6 +161,7 @@ function App() {
             {screen === "progress" ? <Progress userId={userId} /> : null}
           </main>
           <LogMeal dialog={logDialog} userId={userId} />
+          <Settings dialog={settingsDialog} user={user} onLogOut={logOut} />
         </>
       ) : null}
     </div>
