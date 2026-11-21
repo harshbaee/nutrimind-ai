@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database.database import get_db
 from schemas import CoachAnswerResponse, CoachBriefingResponse, CoachQuestionRequest
+from services.auth import require_self
 from services.coach import answer_coach_question, generate_coach_briefing
 
 router = APIRouter()
@@ -26,9 +27,11 @@ def coach_briefing(
 @router.post("/ask", response_model=CoachAnswerResponse)
 def ask_coach(
     request: CoachQuestionRequest,
+    http: Request,
     days: int = Query(default=30, ge=7, le=90),
     db: Session = Depends(get_db),
 ):
+    require_self(http, request.user_id)
     try:
         return answer_coach_question(db, request.user_id, request.question, days)
     except ValueError as exc:

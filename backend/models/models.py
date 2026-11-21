@@ -15,6 +15,7 @@ class User(Base):
     protein_goal = Column(Integer, default=150)
     budget_weekly = Column(Numeric(6, 2), default=50.00)
     dietary_preference = Column(String(50), default="none")
+    password_hash = Column(String(255), nullable=True)  # null: no password set, can't log in
     created_at = Column(DateTime, server_default=func.now())
     meals = relationship("Meal", back_populates="user")
     spending = relationship("SpendingHistory", back_populates="user")
@@ -86,3 +87,20 @@ class Recommendation(Base):
     savings_eur = Column(Numeric(6, 2))
     created_at = Column(DateTime, server_default=func.now())
     user = relationship("User", back_populates="recommendations")
+
+class AuthSession(Base):
+    """One login. Only a SHA-256 of the token is stored, so a copy of the database can't be used to log in."""
+    __tablename__ = "auth_sessions"
+    token_hash = Column(String(64), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False)
+
+
+def ensure_schema(engine) -> None:
+    """Create missing tables, and add columns that newer code expects to tables created before them."""
+    from sqlalchemy import inspect, text
+
+    Base.metadata.create_all(bind=engine)
+    if "password_hash" not in {c["name"] for c in inspect(engine).get_columns("users")}:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR(255)"))

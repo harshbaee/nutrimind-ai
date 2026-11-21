@@ -18,8 +18,8 @@ export const qk = {
   shopping: (uid: number) => ["shopping", uid] as const,
 };
 
-export function useUsers() {
-  return useQuery({ queryKey: qk.users, queryFn: api.listUsers });
+export function useMe(enabled: boolean) {
+  return useQuery({ queryKey: qk.users, queryFn: api.me, enabled, retry: false });
 }
 export function useDaily(uid?: number) {
   return useQuery({

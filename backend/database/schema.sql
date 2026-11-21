@@ -7,7 +7,15 @@ CREATE TABLE IF NOT EXISTS users (
     protein_goal INTEGER DEFAULT 150,
     budget_weekly NUMERIC(6,2) DEFAULT 50.00,
     dietary_preference VARCHAR(50) DEFAULT 'none',
+    password_hash VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Logins (only a SHA-256 of each token is stored)
+CREATE TABLE IF NOT EXISTS auth_sessions (
+    token_hash VARCHAR(64) PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMP NOT NULL
 );
 
 -- Products (from OpenFoodFacts or manual entry)

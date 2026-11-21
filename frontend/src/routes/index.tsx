@@ -4,24 +4,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/sonner";
 import previewCss from "@/components/preview/preview.css?url";
 import appCss from "@/components/app/app.css?url";
-import { useUsers } from "@/hooks/useNutriQueries";
-import { API_BASE_URL } from "@/lib/api";
+import { qk, useMe } from "@/hooks/useNutriQueries";
+import { API_BASE_URL, LOGGED_OUT_EVENT, api, authToken, type AuthResponse } from "@/lib/api";
 import { Today } from "@/components/app/Today";
 import { Plan } from "@/components/app/Plan";
 import { Pantry } from "@/components/app/Pantry";
 import { Progress } from "@/components/app/Progress";
 import { LogMeal } from "@/components/app/LogMeal";
-import { SignUp } from "@/components/app/SignUp";
-
-// The chosen profile is remembered per browser; storage can be blocked, so it's only a convenience.
-const PROFILE_KEY = "nutrimind-profile";
-const savedProfile = () => {
-  try {
-    return Number(localStorage.getItem(PROFILE_KEY)) || undefined;
-  } catch {
-    return undefined;
-  }
-};
+import { Auth } from "@/components/app/Auth";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -50,25 +40,34 @@ const SCREENS = [
 type Screen = (typeof SCREENS)[number]["key"];
 
 function App() {
-  const users = useUsers();
   const queryClient = useQueryClient();
-  const [userId, setUserId] = useState<number>();
+  // undefined until the browser's stored login has been read (the server render can't see it)
+  const [token, setToken] = useState<string | null>();
+  const me = useMe(!!token);
+  const user = me.data;
+  const userId = user?.id;
   const [screen, setScreen] = useState<Screen>("today");
   const logDialog = useRef<HTMLDialogElement>(null);
-  const signUpDialog = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
-    if (userId || !users.data?.length) return;
-    const saved = savedProfile();
-    setUserId(users.data.some((u) => u.id === saved) ? saved : users.data[users.data.length - 1].id);
-  }, [users.data, userId]);
-  const chooseProfile = (id: number) => {
-    setUserId(id);
-    try {
-      localStorage.setItem(PROFILE_KEY, String(id));
-    } catch {
-      // blocked storage: the choice just won't survive a reload
-    }
+    setToken(authToken.get());
+    const loggedOut = () => {
+      queryClient.clear();
+      setToken(null);
+    };
+    window.addEventListener(LOGGED_OUT_EVENT, loggedOut);
+    return () => window.removeEventListener(LOGGED_OUT_EVENT, loggedOut);
+  }, [queryClient]);
+  const logIn = (auth: AuthResponse) => {
+    authToken.set(auth.token);
+    queryClient.setQueryData(qk.users, auth.user);
+    setToken(auth.token);
+  };
+  const logOut = () => {
+    api.logOut().catch(() => {}); // the login is dropped here either way
+    authToken.set(null);
+    queryClient.clear();
+    setToken(null);
   };
 
   // The open screen lives in the address (?screen=plan), so it can be linked to and survives a reload.
@@ -104,10 +103,9 @@ function App() {
       enter.disconnect();
       leave.disconnect();
     };
-  }, [screen]);
+  }, [screen, token, userId]);
 
   const openLog = () => logDialog.current?.showModal();
-  const user = users.data?.find((u) => u.id === userId);
 
   return (
     <div className="np na">
@@ -116,7 +114,7 @@ function App() {
       <header className="np-header">
         <Link className="np-mark" to="/preview" title="About NutriMind">NutriMind</Link>
         <nav className="np-tab" aria-label="Screens">
-          {SCREENS.map((s) => (
+          {!user ? null : SCREENS.map((s) => (
             <a
               key={s.key}
               className="np-link"
@@ -131,37 +129,38 @@ function App() {
             </a>
           ))}
         </nav>
-        <div className="na-right">
-          <select
-            className="na-profile"
-            aria-label="Profile"
-            value={userId ?? ""}
-            onChange={(e) => (e.target.value === "new" ? signUpDialog.current?.showModal() : chooseProfile(Number(e.target.value)))}
-            disabled={!users.data}
-          >
-            {users.data?.map((u) => <option key={u.id} value={u.id}>{u.name}</option>) ?? <option value="">Loading…</option>}
-            {users.data ? <option value="new">New profile…</option> : null}
-          </select>
-          <button type="button" className="np-btn" onClick={openLog}>Log a meal</button>
-        </div>
+        {user ? (
+          <div className="na-right">
+            <button type="button" className="na-profile" onClick={logOut} title={`Logged in as ${user.email}`}>
+              {user.name} · Log out
+            </button>
+            <button type="button" className="np-btn" onClick={openLog}>Log a meal</button>
+          </div>
+        ) : null}
       </header>
 
-      {users.error ? (
+      {me.error && !me.error.message.startsWith("401") ? (
         <div className="na-banner" role="alert">
           <span>Can't reach NutriMind's server at {API_BASE_URL}. Start the backend, then try again.</span>
           <button type="button" className="na-text-btn" onClick={() => queryClient.invalidateQueries()}>Try again</button>
         </div>
       ) : null}
 
-      <main>
-        {screen === "today" ? <Today userId={userId} onLog={openLog} onSeeSwaps={() => goTo("plan")} /> : null}
-        {screen === "plan" ? <Plan user={user} /> : null}
-        {screen === "pantry" ? <Pantry userId={userId} /> : null}
-        {screen === "progress" ? <Progress userId={userId} /> : null}
-      </main>
-
-      <LogMeal dialog={logDialog} userId={userId} />
-      <SignUp dialog={signUpDialog} onCreated={(u) => chooseProfile(u.id)} />
+      {token === null ? (
+        <main>
+          <Auth onLoggedIn={logIn} />
+        </main>
+      ) : user ? (
+        <>
+          <main>
+            {screen === "today" ? <Today userId={userId} onLog={openLog} onSeeSwaps={() => goTo("plan")} /> : null}
+            {screen === "plan" ? <Plan user={user} /> : null}
+            {screen === "pantry" ? <Pantry userId={userId} /> : null}
+            {screen === "progress" ? <Progress userId={userId} /> : null}
+          </main>
+          <LogMeal dialog={logDialog} userId={userId} />
+        </>
+      ) : null}
     </div>
   );
 }

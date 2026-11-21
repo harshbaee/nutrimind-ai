@@ -6,8 +6,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from api.meals import apply_totals, build_food_logs, sync_spending_history
 from database.database import SessionLocal, engine
-from models.models import Base, Meal, Product, User
+from models.models import Meal, Product, User, ensure_schema
 from schemas import FoodLogItemCreate
+from services.auth import hash_password
 
 
 DEMO_USER = {
@@ -18,6 +19,8 @@ DEMO_USER = {
     "budget_weekly": 55.0,
     "dietary_preference": "high-protein",
 }
+# Set only when the demo account has no password yet; override with DEMO_PASSWORD on a shared host.
+DEMO_PASSWORD = os.getenv("DEMO_PASSWORD", "nutrimind-demo")
 
 DEMO_PRODUCTS = [
     {
@@ -108,11 +111,11 @@ def upsert_user(db):
     if not user:
         user = User(**DEMO_USER)
         db.add(user)
-        db.flush()
-        return user
-
-    for key, value in DEMO_USER.items():
-        setattr(user, key, value)
+    else:
+        for key, value in DEMO_USER.items():
+            setattr(user, key, value)
+    if not user.password_hash:
+        user.password_hash = hash_password(DEMO_PASSWORD)
     db.flush()
     return user
 
@@ -166,7 +169,7 @@ def seed_meals(db, user, products_by_barcode):
 
 
 def main():
-    Base.metadata.create_all(bind=engine)
+    ensure_schema(engine)
     db = SessionLocal()
     try:
         user = upsert_user(db)

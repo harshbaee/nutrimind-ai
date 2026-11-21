@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class UserBase(BaseModel):
@@ -11,10 +11,6 @@ class UserBase(BaseModel):
     protein_goal: int = Field(default=150, ge=0)
     budget_weekly: float = Field(default=50.0, ge=0)
     dietary_preference: str = Field(default="none", max_length=50)
-
-
-class UserCreate(UserBase):
-    pass
 
 
 class UserUpdate(BaseModel):
@@ -31,6 +27,26 @@ class UserResponse(UserBase):
 
     id: int
     created_at: datetime
+
+
+def normalise_email(value: str) -> str:
+    return value.strip().lower()
+
+
+class SignUpRequest(UserBase):
+    password: str = Field(min_length=8, max_length=128)
+    _email = field_validator("email")(normalise_email)
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=150)
+    password: str = Field(min_length=1, max_length=128)
+    _email = field_validator("email")(normalise_email)
+
+
+class AuthResponse(BaseModel):
+    token: str
+    user: UserResponse
 
 
 class ProductBase(BaseModel):

@@ -395,13 +395,48 @@ export type ShoppingItem = {
 
 export type ShoppingList = { user_id: number; items: ShoppingItem[]; total_eur: number; unpriced: number };
 
-export type NewUser = Omit<User, "id" | "created_at">;
+export type NewUser = Omit<User, "id" | "created_at"> & { password: string };
+export type AuthResponse = { token: string; user: User };
+
+// The login token lives in this browser's storage. Storage can be blocked (private windows), in which
+// case the login lasts until the page is closed.
+const TOKEN_KEY = "nutrimind-token";
+let memoryToken: string | null = null;
+export const authToken = {
+  get: () => {
+    try {
+      return localStorage.getItem(TOKEN_KEY) ?? memoryToken;
+    } catch {
+      return memoryToken;
+    }
+  },
+  set: (token: string | null) => {
+    memoryToken = token;
+    try {
+      if (token) localStorage.setItem(TOKEN_KEY, token);
+      else localStorage.removeItem(TOKEN_KEY);
+    } catch {
+      // blocked storage: the in-memory copy still works for this visit
+    }
+  },
+};
+export const LOGGED_OUT_EVENT = "nutrimind:logged-out";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = authToken.get();
   const res = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
     ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init?.headers || {}),
+    },
   });
+  if (res.status === 401 && token && !path.startsWith("/auth/login")) {
+    // The login expired or was ended elsewhere: drop it and send the person back to the login screen.
+    authToken.set(null);
+    window.dispatchEvent(new Event(LOGGED_OUT_EVENT));
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(
@@ -413,8 +448,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  listUsers: () => request<User[]>("/users/"),
-  createUser: (body: NewUser) => request<User>("/users/", { method: "POST", body: JSON.stringify(body) }),
+  signUp: (body: NewUser) => request<AuthResponse>("/auth/signup", { method: "POST", body: JSON.stringify(body) }),
+  logIn: (body: { email: string; password: string }) =>
+    request<AuthResponse>("/auth/login", { method: "POST", body: JSON.stringify(body) }),
+  logOut: () => request<void>("/auth/logout", { method: "POST" }),
+  me: () => request<User>("/auth/me"),
   barcode: (code: string) => request<FoodSearchResult>(`/food/barcode/${encodeURIComponent(code)}`),
   repeatMeal: (mealId: number) => request<unknown>(`/meals/${mealId}/repeat`, { method: "POST" }),
   shoppingList: (userId: number) => request<ShoppingList>(`/analytics/shopping-list/${userId}`),

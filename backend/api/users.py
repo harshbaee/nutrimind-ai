@@ -1,36 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database.database import get_db
 from models.models import User
-from schemas import UserCreate, UserResponse, UserUpdate
+from schemas import UserResponse, UserUpdate
 
 router = APIRouter()
+# Accounts are created with POST /auth/signup, which sets the password.
 
 
 @router.get("/", response_model=list[UserResponse])
-def list_users(db: Session = Depends(get_db)):
-    return db.query(User).order_by(User.created_at.desc()).all()
-
-
-@router.post("/", response_model=UserResponse, status_code=201)
-def create_user(user_data: UserCreate, db: Session = Depends(get_db)):
-    existing = db.query(User).filter(User.email == user_data.email).first()
-    if existing:
-        raise HTTPException(status_code=409, detail="A user with this email already exists")
-
-    user = User(**user_data.model_dump())
-    db.add(user)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="A user with this email already exists")
-
-    db.refresh(user)
-    return user
+def list_users(request: Request):
+    return [request.state.user]  # only your own account: listing everyone would expose their emails
 
 
 @router.get("/{user_id}", response_model=UserResponse)
@@ -49,6 +32,7 @@ def update_user(user_id: int, user_data: UserUpdate, db: Session = Depends(get_d
 
     updates = user_data.model_dump(exclude_unset=True)
     if "email" in updates:
+        updates["email"] = updates["email"].strip().lower()  # logins look emails up in lower case
         existing = db.query(User).filter(User.email == updates["email"], User.id != user_id).first()
         if existing:
             raise HTTPException(status_code=409, detail="A user with this email already exists")

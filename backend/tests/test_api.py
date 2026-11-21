@@ -18,7 +18,9 @@ from main import app
 
 seed_demo.main()
 client = TestClient(app)
-USER_ID = client.get("/users/").json()[0]["id"]
+login = client.post("/auth/login", json={"email": "demo@nutrimind.ai", "password": seed_demo.DEMO_PASSWORD}).json()
+client.headers["Authorization"] = f"Bearer {login['token']}"
+USER_ID = login["user"]["id"]
 
 
 @pytest.mark.parametrize(
@@ -45,8 +47,8 @@ def test_get_endpoints(path):
     assert client.get(path).status_code == 200
 
 
-def test_unknown_user_is_404():
-    assert client.get("/users/999999").status_code == 404
+def test_other_users_ids_are_refused():
+    assert client.get("/users/999999").status_code == 403
 
 
 def test_log_then_delete_meal_updates_history():
@@ -216,16 +218,79 @@ def test_shopping_list_rounds_up_to_whole_packs():
     lentils = next(i for i in shop["items"] if i["product_id"] == product)
     assert (lentils["grams"], lentils["packs"], lentils["cost_eur"]) == (700, 2, 2.40)  # 700 g needs two 500 g packs
     assert shop["total_eur"] == pytest.approx(sum(i["cost_eur"] or 0 for i in shop["items"]), abs=0.01)
-    assert client.get("/analytics/shopping-list/999999").status_code == 404
+    assert client.get("/analytics/shopping-list/999999").status_code == 403
     client.delete(f"/meals/{meal}")
 
 
-def test_sign_up_creates_a_profile_and_rejects_duplicate_email():
-    body = {"name": "Sam", "email": "sam@example.com", "calorie_goal": 2400, "protein_goal": 140, "budget_weekly": 60}
-    res = client.post("/users/", json=body)
-    assert res.status_code == 201
-    assert res.json()["name"] == "Sam"
-    assert client.post("/users/", json=body).status_code == 409
+def sign_up(email, password="correct horse battery"):
+    """A second account, with its own client, so tests can check one user can't reach the other's data."""
+    other = TestClient(app)
+    res = other.post("/auth/signup", json={"name": "Sam", "email": email, "password": password, "calorie_goal": 2400})
+    assert res.status_code == 201, res.text
+    other.headers["Authorization"] = f"Bearer {res.json()['token']}"
+    return other, res.json()["user"]["id"]
+
+
+def test_sign_up_logs_in_and_rejects_duplicate_or_weak_details():
+    sam, sam_id = sign_up("Sam@Example.com ")
+    assert sam.get("/auth/me").json()["email"] == "sam@example.com"  # stored trimmed and lower case
+    assert sam.get("/users/").json() == [sam.get("/auth/me").json()]  # sees only their own account
+    dup = {"name": "Sam", "email": "sam@example.com", "password": "another password"}
+    assert client.post("/auth/signup", json=dup).status_code == 409
+    weak = {"name": "Sam", "email": "weak@example.com", "password": "short"}
+    assert client.post("/auth/signup", json=weak).status_code == 422
+    assert client.post("/users/", json=dup).status_code == 405  # no account creation without a password
+
+
+def test_requests_without_a_valid_login_are_refused():
+    anonymous = TestClient(app)
+    assert anonymous.get("/").status_code == 200
+    assert anonymous.get(f"/meals/history/{USER_ID}").status_code == 401
+    assert anonymous.get("/food/saved").status_code == 401
+    assert anonymous.get("/auth/me", headers={"Authorization": "Bearer made-up-token"}).status_code == 401
+
+
+def test_login_checks_the_password_and_logout_ends_the_session():
+    assert client.post("/auth/login", json={"email": "demo@nutrimind.ai", "password": "wrong password"}).status_code == 401
+    assert client.post("/auth/login", json={"email": "nobody@example.com", "password": "anything"}).status_code == 401
+    other = TestClient(app)
+    token = other.post("/auth/login", json={"email": "DEMO@nutrimind.ai", "password": seed_demo.DEMO_PASSWORD}).json()["token"]
+    other.headers["Authorization"] = f"Bearer {token}"
+    assert other.get("/auth/me").status_code == 200
+    assert other.post("/auth/logout").status_code == 204
+    assert other.get("/auth/me").status_code == 401
+    assert client.get("/auth/me").status_code == 200  # other logins are unaffected
+
+
+def test_repeated_wrong_passwords_are_throttled():
+    sign_up("locked@example.com")
+    wrong = {"email": "locked@example.com", "password": "not the password"}
+    assert [client.post("/auth/login", json=wrong).status_code for _ in range(5)] == [401] * 5
+    right = {"email": "locked@example.com", "password": "correct horse battery"}
+    assert client.post("/auth/login", json=right).status_code == 429  # blocked even with the right one
+
+
+def test_users_cannot_touch_each_others_data():
+    sam, sam_id = sign_up("eve@example.com")
+    demo_meal = client.get(f"/meals/history/{USER_ID}").json()[0]["id"]
+    assert sam.get(f"/meals/history/{USER_ID}").status_code == 403
+    assert sam.get(f"/coach/briefing/{USER_ID}").status_code == 403
+    assert sam.get(f"/meals/{demo_meal}").status_code == 404
+    assert sam.delete(f"/meals/{demo_meal}").status_code == 404
+    assert sam.post(f"/meals/{demo_meal}/repeat").status_code == 404
+    item = [{"product_id": 2, "quantity_g": 100}]
+    assert sam.post("/meals/log", json={"user_id": USER_ID, "name": "x", "meal_type": "lunch", "items": item}).status_code == 403
+    assert sam.post("/coach/ask", json={"user_id": USER_ID, "question": "Hello?"}).status_code == 403
+    assert sam.post("/optimization/meal-plan", json={"user_id": USER_ID}).status_code == 403
+    assert client.get(f"/meals/{demo_meal}").status_code == 200  # still there for its owner
+
+
+def test_passwords_are_stored_salted_and_hashed():
+    from services.auth import hash_password, verify_password
+    a, b = hash_password("same password"), hash_password("same password")
+    assert a != b and "same password" not in a
+    assert verify_password("same password", a) and not verify_password("other", a)
+    assert not verify_password("anything", None) and not verify_password("anything", "garbage")
 
 
 def test_barcode_lookup_parses_the_sdk_product(monkeypatch):

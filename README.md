@@ -18,7 +18,7 @@ An AI-powered nutrition, meal cost & food optimisation platform. It answers "whi
 | 5 | Predictive analytics (forecasts, anomalies, risk flags) | [phase 5](docs/phase-5-predictive-analytics.md) |
 | 6 | Gamified insights (streaks, badges, challenges) | [phase 6](docs/phase-6-gamified-insights.md) |
 | 7 | AI coach briefing + Q&A: written by your AI model (via OmniRoute) when configured, rule-based otherwise | [phase 7](docs/phase-7-ai-coach.md) |
-| 8 | Everyday features: barcode lookup and camera scanning, "Log again" for past meals, next week's shopping list, sign-up for more profiles (no passwords yet) | this README |
+| 8 | Everyday features: barcode lookup and camera scanning, "Log again" for past meals, next week's shopping list, accounts with email and password | this README |
 
 ## Run locally (Windows / PowerShell)
 
@@ -32,7 +32,9 @@ cd backend
 ..\.venv\Scripts\python -m uvicorn main:app --reload
 ```
 
-API docs: http://127.0.0.1:8000/docs
+API docs: http://127.0.0.1:8000/docs (use **Authorize** with a token from `POST /auth/login`)
+
+Logins: everything except `/` and `/auth/*` needs a login, and each account sees only its own data. The seed gives the demo account the password `nutrimind-demo` (only if it has none yet); set `DEMO_PASSWORD` before seeding anywhere other people can reach. Passwords are stored as salted scrypt hashes; logins last 30 days, and five wrong passwords in 15 minutes block that email for a while.
 
 AI coach: add these to `.env` and the coach's answers and daily headline are written by your AI model from your logged figures. Any OpenAI-compatible endpoint works; the default is a local OmniRoute.
 

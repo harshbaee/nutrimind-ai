@@ -1,12 +1,13 @@
 from datetime import date, datetime, time, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database.database import get_db
 from models.models import FoodLog, Meal, Product, SpendingHistory, User
 from schemas import FoodLogItemCreate, FoodLogItemResponse, MealCreate, MealDetail, MealSummary, MealUpdate
+from services.auth import require_self
 
 router = APIRouter()
 
@@ -137,7 +138,12 @@ def sync_spending_history(db: Session, user_id: int, target_date: date) -> None:
 
 
 @router.post("/log", response_model=MealDetail, status_code=201)
-def log_meal(meal_data: MealCreate, db: Session = Depends(get_db)):
+def log_meal(meal_data: MealCreate, request: Request, db: Session = Depends(get_db)):
+    require_self(request, meal_data.user_id)
+    return create_meal(meal_data, db)
+
+
+def create_meal(meal_data: MealCreate, db: Session) -> MealDetail:
     user = db.query(User).filter(User.id == meal_data.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -225,7 +231,7 @@ def repeat_meal(meal_id: int, db: Session = Depends(get_db)):
     if not logs:
         raise HTTPException(status_code=400, detail="That meal has no foods to repeat")
     items = [FoodLogItemCreate(product_id=log.product_id, quantity_g=as_float(log.quantity_g)) for log in logs]
-    return log_meal(
+    return create_meal(
         MealCreate(user_id=meal.user_id, name=meal.name, meal_type=meal.meal_type or "snack", items=items), db
     )
 
