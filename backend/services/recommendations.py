@@ -93,7 +93,9 @@ def generate_user_recommendations(db: Session, user_id: int) -> list[Recommendat
     ).delete(synchronize_session=False)
 
     recommendations: list[Recommendation] = []
-    products = db.query(Product).filter(Product.estimated_price_eur.isnot(None)).all()
+    products = db.query(Product).filter(
+        Product.user_id == user_id, Product.estimated_price_eur.isnot(None)
+    ).all()
     priced_products = [product for product in products if cost_per_100g(product) is not None]
 
     generate_substitution_recommendations(recommendations, user_id, priced_products)

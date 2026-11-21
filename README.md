@@ -38,7 +38,7 @@ Most tools focus on either nutrition or budgeting, but not both. NutriMind AI ex
 | 5 | Predictive analytics (forecasts, anomalies, risk flags) | [phase 5](docs/phase-5-predictive-analytics.md) |
 | 6 | Gamified insights (streaks, badges, challenges) | [phase 6](docs/phase-6-gamified-insights.md) |
 | 7 | AI coach briefing + Q&A: written by your AI model (via OmniRoute) when configured, rule-based otherwise | [phase 7](docs/phase-7-ai-coach.md) |
-| 8 | Everyday features: barcode lookup and camera scanning, "Log again" for past meals, next week's shopping list, accounts with email and password | this README |
+| 8 | Everyday features: barcode lookup and camera scanning, "Log again" for past meals, next week's shopping list, accounts with email and password, each with its own pantry and prices | this README |
 
 ## Run locally (Windows / PowerShell)
 

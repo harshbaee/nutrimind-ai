@@ -48,7 +48,8 @@ def meal_detail(meal: Meal, db: Session) -> MealDetail:
     return MealDetail(meal=meal_summary(meal), items=[food_log_response(log) for log in logs])
 
 
-def build_food_logs(items: list[FoodLogItemCreate], db: Session):
+def build_food_logs(items: list[FoodLogItemCreate], db: Session, user_id: int):
+    """Food log rows and totals for a meal; every food must be in that user's pantry."""
     totals = {
         "calories": 0.0,
         "protein": 0.0,
@@ -59,7 +60,7 @@ def build_food_logs(items: list[FoodLogItemCreate], db: Session):
     entries: list[FoodLog] = []
 
     for item in items:
-        product = db.query(Product).filter(Product.id == item.product_id).first()
+        product = db.query(Product).filter(Product.id == item.product_id, Product.user_id == user_id).first()
         if not product:
             raise HTTPException(status_code=404, detail=f"Product {item.product_id} not found")
 
@@ -148,7 +149,7 @@ def create_meal(meal_data: MealCreate, db: Session) -> MealDetail:
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    totals, food_log_entries = build_food_logs(meal_data.items, db)
+    totals, food_log_entries = build_food_logs(meal_data.items, db, meal_data.user_id)
     meal = Meal(
         user_id=meal_data.user_id,
         name=meal_data.name,
@@ -192,7 +193,7 @@ def update_meal(meal_id: int, meal_data: MealUpdate, db: Session = Depends(get_d
 
     if meal_data.items is not None:
         db.query(FoodLog).filter(FoodLog.meal_id == meal.id).delete(synchronize_session=False)
-        totals, food_log_entries = build_food_logs(meal_data.items, db)
+        totals, food_log_entries = build_food_logs(meal_data.items, db, meal.user_id)
         apply_totals(meal, totals)
         db.flush()
         for entry in food_log_entries:

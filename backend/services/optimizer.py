@@ -255,7 +255,9 @@ def optimize_meal_plan(db: Session, request: OptimizationRequest) -> Optimizatio
     budget_eur = request.budget_eur if request.budget_eur is not None else round(as_float(user.budget_weekly) / 7, 2)
     dietary_preference = request.dietary_preference or user.dietary_preference or "none"
 
-    products = db.query(Product).filter(Product.estimated_price_eur.isnot(None)).all()
+    products = db.query(Product).filter(
+        Product.user_id == user.id, Product.estimated_price_eur.isnot(None)
+    ).all()
     candidates, warnings = build_candidates(products, dietary_preference)
     if not candidates:
         raise ValueError("No priced products available for optimisation")

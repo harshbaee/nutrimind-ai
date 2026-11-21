@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from sqlalchemy.orm import Session
 from datetime import datetime, time, timedelta
 import sys, os
@@ -64,8 +64,10 @@ def daily_summary(user_id: int, db: Session = Depends(get_db)):
     }
 
 @router.get("/rankings")
-def efficiency_rankings(db: Session = Depends(get_db)):
-    products = db.query(Product).filter(Product.estimated_price_eur.isnot(None)).all()
+def efficiency_rankings(request: Request, db: Session = Depends(get_db)):
+    products = db.query(Product).filter(
+        Product.user_id == request.state.user.id, Product.estimated_price_eur.isnot(None)
+    ).all()
     rankings = []
     for p in products:
         cost = cost_per_100g(p)

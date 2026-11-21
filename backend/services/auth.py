@@ -10,7 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from database.database import get_db
-from models.models import AuthSession, Meal, User
+from models.models import AuthSession, Meal, Product, User
 
 SESSION_DAYS = 30
 SCRYPT = {"n": 2**14, "r": 8, "p": 1}  # OWASP's minimum for scrypt; ~50 ms per hash
@@ -104,7 +104,8 @@ def _int_param(request: Request, name: str) -> int | None:
 
 
 def authorize(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)) -> User:
-    """Runs before every user-data route: a {user_id} in the path must be you, a {meal_id} must be your meal."""
+    """Runs before every user-data route: a {user_id} in the path must be you, a {meal_id} or {product_id}
+    must be yours."""
     user_id = _int_param(request, "user_id")
     if user_id is not None and user_id != user.id:
         raise HTTPException(status_code=403, detail="That isn't your account")
@@ -113,6 +114,11 @@ def authorize(request: Request, user: User = Depends(current_user), db: Session 
         owner = db.query(Meal.user_id).filter(Meal.id == meal_id).scalar()
         if owner is not None and owner != user.id:
             raise HTTPException(status_code=404, detail="Meal not found")  # don't confirm other people's meals exist
+    product_id = _int_param(request, "product_id")
+    if product_id is not None:
+        owner = db.query(Product.user_id).filter(Product.id == product_id).scalar()
+        if owner is not None and owner != user.id:
+            raise HTTPException(status_code=404, detail="Product not found")
     request.state.user = user
     return user
 

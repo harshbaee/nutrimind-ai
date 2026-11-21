@@ -70,7 +70,7 @@ def ask_ai(prompt: str) -> str | None:
 
 def coach_facts(db: Session, briefing: CoachBriefingResponse) -> str:
     """The person's figures as JSON for the AI model. Sorted keys keep it stable, so unchanged data hits the cache."""
-    products = [p for p in db.query(Product).all() if protein_per_euro(p) > 0]
+    products = [p for p in db.query(Product).filter(Product.user_id == briefing.user_id) if protein_per_euro(p) > 0]
     meals = todays_meals(db, briefing.user_id)
     return json.dumps(
         {
@@ -151,8 +151,9 @@ def get_recommendations(db: Session, user_id: int) -> list[Recommendation]:
     return generate_user_recommendations(db, user_id)
 
 
-def best_efficiency_product(db: Session) -> Product | None:
+def best_efficiency_product(db: Session, user_id: int) -> Product | None:
     products = db.query(Product).filter(
+        Product.user_id == user_id,
         Product.estimated_price_eur.isnot(None),
         Product.protein_per_100g.isnot(None),
     ).all()
@@ -234,7 +235,7 @@ def build_actions(
     calorie_goal = as_float(user.calorie_goal)
     weekly_budget = as_float(user.budget_weekly)
     daily_budget = weekly_budget / 7 if weekly_budget else 0
-    best_product = best_efficiency_product(db)
+    best_product = best_efficiency_product(db, user.id)
 
     if protein_goal and today_protein < protein_goal * 0.75:
         product_hint = f" Add {best_product.name} as the cheapest high-protein anchor." if best_product else ""

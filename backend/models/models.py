@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Numeric, ForeignKey, DateTime, Date
+from sqlalchemy import Column, Integer, String, Numeric, ForeignKey, DateTime, Date, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import sys
@@ -22,9 +22,12 @@ class User(Base):
     recommendations = relationship("Recommendation", back_populates="user")
 
 class Product(Base):
+    """A food in one account's pantry, with that account's price and pack size."""
     __tablename__ = "products"
+    __table_args__ = (UniqueConstraint("user_id", "barcode", name="uq_products_user_barcode"),)
     id = Column(Integer, primary_key=True, index=True)
-    barcode = Column(String(50), unique=True, nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    barcode = Column(String(50), nullable=True)
     name = Column(String(200), nullable=False)
     brand = Column(String(100))
     calories_per_100g = Column(Numeric(6, 2))
@@ -104,3 +107,42 @@ def ensure_schema(engine) -> None:
     if "password_hash" not in {c["name"] for c in inspect(engine).get_columns("users")}:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR(255)"))
+    product_columns = [c["name"] for c in inspect(engine).get_columns("products")]
+    if "user_id" not in product_columns:
+        with engine.begin() as conn:
+            split_shared_pantry(conn, engine.dialect.name, product_columns)
+
+
+def split_shared_pantry(conn, dialect: str, product_columns: list[str]) -> None:
+    """Pantries became per account. Every account was using the one shared pantry, so each gets its own copy,
+    with its meals and recommendations pointed at that copy: nobody loses a food or a logged meal."""
+    from sqlalchemy import text
+
+    conn.execute(text("ALTER TABLE products ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE"))
+    users = [row[0] for row in conn.execute(text("SELECT id FROM users ORDER BY id"))]
+    if not users:
+        return
+    conn.execute(text("UPDATE products SET user_id = :u"), {"u": users[0]})
+    if dialect != "postgresql":
+        # shortcut: an existing SQLite file keeps its app-wide unique barcode (SQLite can't drop it without
+        # rebuilding the table), so the oldest account keeps the foods and others start empty; fresh files are fine.
+        return
+    # The old rule allowed one product per barcode in the whole app; now it's one per account.
+    conn.execute(text("ALTER TABLE products DROP CONSTRAINT IF EXISTS products_barcode_key"))
+    conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_products_user_barcode ON products (user_id, barcode)"))
+    copied = [c for c in product_columns if c != "id"]
+    originals = [row[0] for row in conn.execute(text("SELECT id FROM products WHERE user_id = :u"), {"u": users[0]})]
+    for user_id in users[1:]:
+        for old_id in originals:
+            new_id = conn.execute(
+                text(f"INSERT INTO products ({', '.join(copied)}, user_id) SELECT {', '.join(copied)}, :u "
+                     "FROM products WHERE id = :old RETURNING id"),
+                {"u": user_id, "old": old_id},
+            ).scalar()
+            ids = {"u": user_id, "old": old_id, "new": new_id}
+            conn.execute(text("UPDATE food_logs SET product_id = :new WHERE product_id = :old "
+                              "AND meal_id IN (SELECT id FROM meals WHERE user_id = :u)"), ids)
+            conn.execute(text("UPDATE recommendations SET source_product_id = :new "
+                              "WHERE source_product_id = :old AND user_id = :u"), ids)
+            conn.execute(text("UPDATE recommendations SET suggested_product_id = :new "
+                              "WHERE suggested_product_id = :old AND user_id = :u"), ids)

@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 -- Products (from OpenFoodFacts or manual entry)
 CREATE TABLE IF NOT EXISTS products (
     id SERIAL PRIMARY KEY,
-    barcode VARCHAR(50) UNIQUE,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,  -- whose pantry
+    barcode VARCHAR(50),
     name VARCHAR(200) NOT NULL,
     brand VARCHAR(100),
     calories_per_100g NUMERIC(6,2),
@@ -33,6 +34,7 @@ CREATE TABLE IF NOT EXISTS products (
     category VARCHAR(100),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uq_products_user_barcode ON products (user_id, barcode);
 
 -- Meals
 CREATE TABLE IF NOT EXISTS meals (

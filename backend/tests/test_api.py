@@ -303,3 +303,20 @@ def test_barcode_lookup_parses_the_sdk_product(monkeypatch):
     found = client.get("/food/barcode/3017620422003").json()
     assert (found["name"], found["barcode"], found["protein_per_100g"], found["serving_size_g"]) == ("Nutella", "3017620422003", 6.3, 400)
     assert client.get("/food/barcode/0000000000000").status_code == 404
+
+
+def test_each_account_has_its_own_pantry():
+    pat, pat_id = sign_up("pat@example.com")
+    demo_food = client.get("/food/saved").json()[0]
+    assert pat.get("/food/saved").json() == []  # a new account starts with an empty pantry
+    assert pat.get("/nutrition/rankings").json()["rankings"] == []
+    assert pat.get(f"/food/{demo_food['id']}").status_code == 404
+    assert pat.patch(f"/food/{demo_food['id']}/price", json={"estimated_price_eur": 0.01}).status_code == 404
+    item = [{"product_id": demo_food["id"], "quantity_g": 100}]
+    assert pat.post("/meals/log", json={"user_id": pat_id, "name": "x", "meal_type": "lunch", "items": item}).status_code == 404
+
+    # The same barcode can be in both pantries, each with its own price.
+    copy = pat.post("/food/save", json={"barcode": demo_food["barcode"], "name": demo_food["name"], "estimated_price_eur": 9.99}).json()
+    assert copy["message"] == "Product saved" and copy["id"] != demo_food["id"]
+    assert client.get(f"/food/{demo_food['id']}").json()["estimated_price_eur"] == demo_food["estimated_price_eur"]
+    assert [p["id"] for p in pat.get("/food/saved").json()] == [copy["id"]]

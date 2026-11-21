@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 import openfoodfacts
@@ -116,25 +116,27 @@ def get_by_barcode(barcode: str, db: Session = Depends(get_db)):
 
 @router.get("/saved", response_model=list[ProductResponse])
 def saved_products(
+    request: Request,
     search: str | None = None,
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db),
 ):
-    query = db.query(Product)
+    query = db.query(Product).filter(Product.user_id == request.state.user.id)
     if search:
         query = query.filter(Product.name.ilike(f"%{search}%"))
     return query.order_by(Product.created_at.desc()).limit(limit).all()
 
 
 @router.post("/save")
-def save_product(product: ProductCreate, db: Session = Depends(get_db)):
+def save_product(product: ProductCreate, request: Request, db: Session = Depends(get_db)):
+    user_id = request.state.user.id
     payload = product.model_dump(exclude_unset=True)
     if payload.get("barcode"):
-        existing = db.query(Product).filter(Product.barcode == payload.get("barcode")).first()
+        existing = db.query(Product).filter(Product.user_id == user_id, Product.barcode == payload.get("barcode")).first()
         if existing:
             return {"message": "Product already exists", "id": existing.id, "product": existing}
 
-    new_product = Product(**payload)
+    new_product = Product(**payload, user_id=user_id)
     db.add(new_product)
     try:
         db.commit()
@@ -157,7 +159,9 @@ def update_product(product_id: int, product_data: ProductUpdate, db: Session = D
     updates = product_data.model_dump(exclude_unset=True)
 
     if updates.get("barcode"):
-        existing = db.query(Product).filter(Product.barcode == updates["barcode"], Product.id != product_id).first()
+        existing = db.query(Product).filter(
+            Product.user_id == product.user_id, Product.barcode == updates["barcode"], Product.id != product_id
+        ).first()
         if existing:
             raise HTTPException(status_code=409, detail="Product barcode already exists")
 

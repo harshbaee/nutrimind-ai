@@ -120,12 +120,12 @@ def upsert_user(db):
     return user
 
 
-def upsert_products(db):
+def upsert_products(db, user):
     products_by_barcode = {}
     for payload in DEMO_PRODUCTS:
-        product = db.query(Product).filter(Product.barcode == payload["barcode"]).first()
+        product = db.query(Product).filter(Product.user_id == user.id, Product.barcode == payload["barcode"]).first()
         if not product:
-            product = Product(**payload)
+            product = Product(**payload, user_id=user.id)
             db.add(product)
         else:
             for key, value in payload.items():
@@ -146,7 +146,7 @@ def seed_meals(db, user, products_by_barcode):
             FoodLogItemCreate(product_id=products_by_barcode[barcode].id, quantity_g=quantity)
             for barcode, quantity in items
         ]
-        totals, food_logs = build_food_logs(meal_items, db)
+        totals, food_logs = build_food_logs(meal_items, db, user.id)
         meal = Meal(
             user_id=user.id,
             name=name,
@@ -173,7 +173,7 @@ def main():
     db = SessionLocal()
     try:
         user = upsert_user(db)
-        products_by_barcode = upsert_products(db)
+        products_by_barcode = upsert_products(db, user)
         seed_meals(db, user, products_by_barcode)
         db.commit()
         print(f"Seeded demo user {user.email} with {len(products_by_barcode)} products.")
