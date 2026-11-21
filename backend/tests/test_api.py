@@ -7,8 +7,7 @@ from datetime import date, timedelta
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Must be set before the database module is imported.
 os.environ["DATABASE_URL"] = "sqlite:///" + os.path.join(tempfile.mkdtemp(), "test.sqlite3")
-os.environ.pop("ANTHROPIC_API_KEY", None)  # tests never call a real model
-from types import SimpleNamespace
+os.environ.pop("COACH_API_KEY", None)  # tests never call a real model
 
 import pytest
 from fastapi.testclient import TestClient
@@ -80,56 +79,55 @@ def test_recommendations_generate():
 def test_coach_answers_question():
     res = client.post("/coach/ask?days=30", json={"user_id": USER_ID, "question": "How can I improve protein?"})
     assert res.status_code == 200
-    assert not any(s.startswith("Claude") for s in res.json()["sources"])  # no key: rule-based answer
+    assert not any(s.startswith("AI coach") for s in res.json()["sources"])  # no key: rule-based answer
 
 
-class FakeClaude:
-    """Stands in for anthropic.Anthropic; records each request and replies with fixed text."""
-    calls = []
+class FakeReply:
+    """An OpenAI-style chat completion, as OmniRoute returns it."""
+    def raise_for_status(self):
+        pass
 
-    def __init__(self, **_):
-        self.beta = self
-        self.messages = self
-
-    def create(self, **kwargs):
-        FakeClaude.calls.append(kwargs)
-        block = SimpleNamespace(type="text", text="Add 200 g of Skyr to close the gap.")
-        return SimpleNamespace(stop_reason="end_turn", content=[block])
+    def json(self):
+        return {"choices": [{"message": {"content": "Add 200 g of Skyr to close the gap."}}]}
 
 
-def test_coach_uses_claude_when_key_is_set(monkeypatch):
+def use_ai_coach(monkeypatch, post):
     from services import coach
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setattr(coach.anthropic, "Anthropic", FakeClaude)
-    coach._claude_cache.clear()
-    FakeClaude.calls.clear()
+    monkeypatch.setenv("COACH_API_KEY", "test-key")
+    monkeypatch.setenv("COACH_MODEL", "my-combo")
+    monkeypatch.setenv("COACH_API_BASE_URL", "http://omniroute.test/v1/")
+    monkeypatch.setattr(coach.requests, "post", post)
+    coach._ai_cache.clear()
+
+
+def test_coach_uses_ai_model_when_configured(monkeypatch):
+    calls = []
+    use_ai_coach(monkeypatch, lambda url, **kw: calls.append((url, kw)) or FakeReply())
 
     res = client.post("/coach/ask?days=30", json={"user_id": USER_ID, "question": "Cheapest protein?"}).json()
     assert res["answer"] == "Add 200 g of Skyr to close the gap."
-    assert res["sources"][0] == "Claude (claude-opus-5-5)"
-    sent = FakeClaude.calls[-1]
-    assert sent["model"] == "claude-opus-5-5"
-    assert "Cheapest protein?" in sent["messages"][0]["content"]
-    assert "saved_foods_best_protein_per_euro" in sent["messages"][0]["content"]
+    assert res["sources"][0] == "AI coach (my-combo)"
+    url, kw = calls[-1]
+    assert url == "http://omniroute.test/v1/chat/completions"
+    assert kw["headers"]["Authorization"] == "Bearer test-key"
+    assert kw["json"]["model"] == "my-combo"
+    prompt = kw["json"]["messages"][1]["content"]
+    assert "Cheapest protein?" in prompt and "saved_foods_best_protein_per_euro" in prompt
 
     briefing = client.get(f"/coach/briefing/{USER_ID}?days=30").json()
     assert briefing["headline"] == "Add 200 g of Skyr to close the gap."
 
 
-def test_coach_falls_back_when_claude_fails(monkeypatch):
+def test_coach_falls_back_when_ai_model_fails(monkeypatch):
     from services import coach
 
-    class Down(FakeClaude):
-        def create(self, **kwargs):
-            raise coach.anthropic.APIConnectionError(request=None)
+    def down(url, **kw):
+        raise coach.requests.ConnectionError("OmniRoute is not running")
 
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setattr(coach.anthropic, "Anthropic", Down)
-    coach._claude_cache.clear()
-
+    use_ai_coach(monkeypatch, down)
     res = client.post("/coach/ask?days=30", json={"user_id": USER_ID, "question": "How can I stay under budget?"})
     assert res.status_code == 200
-    assert not res.json()["sources"][0].startswith("Claude")
+    assert not res.json()["sources"][0].startswith("AI coach")
 
 
 def test_rankings_use_cost_per_100g():

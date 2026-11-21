@@ -3,7 +3,7 @@ import logging
 import os
 from datetime import datetime, time, timedelta
 
-import anthropic
+import requests
 from sqlalchemy.orm import Session
 
 from models.models import Meal, Product, Recommendation, User
@@ -22,51 +22,54 @@ from services.recommendations import generate_user_recommendations, protein_per_
 
 log = logging.getLogger(__name__)
 
-COACH_MODEL = "claude-opus-5-5"
 COACH_SYSTEM = (
     "You are NutriMind's nutrition coach. You help one person eat to their own protein, calorie and budget goals. "
     "Use only the figures and foods in the data you are given; never invent foods, prices or numbers. "
     "Prices are in euros. Reply in plain English, at most four short sentences, with no headings, lists or markdown. "
     "Name a specific food from the data when it helps."
 )
-_claude_cache: dict[tuple[str, str], str] = {}
+_ai_cache: dict[str, str] = {}
 
 
-def ask_claude(prompt: str, effort: str) -> str | None:
-    """Claude's reply, or None when ANTHROPIC_API_KEY is unset or the call fails, so callers keep the rule-based text."""
-    # Only an explicit key turns this on, so tests and dev shells with proxy credentials never call a model by accident.
-    if not os.getenv("ANTHROPIC_API_KEY"):
+def coach_model() -> str | None:
+    """The model (or OmniRoute combo) name, when the AI coach is configured."""
+    return os.getenv("COACH_MODEL") if os.getenv("COACH_API_KEY") else None
+
+
+def ask_ai(prompt: str) -> str | None:
+    """The AI model's reply from an OpenAI-compatible endpoint (OmniRoute by default), or None when
+    COACH_API_KEY / COACH_MODEL are unset or the call fails, so callers keep the rule-based text."""
+    model = coach_model()
+    if not model:
         return None
-    key = (prompt, effort)
-    if key in _claude_cache:
-        return _claude_cache[key]
+    if prompt in _ai_cache:
+        return _ai_cache[prompt]
+    url = os.getenv("COACH_API_BASE_URL", "http://localhost:20128/v1").rstrip("/") + "/chat/completions"
     try:
-        response = anthropic.Anthropic(timeout=30.0, max_retries=1).beta.messages.create(
-            model=COACH_MODEL,
-            max_tokens=16000,
-            system=COACH_SYSTEM,
-            output_config={"effort": effort},
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",  # a declined request is retried on a fallback model inside the same call
-            messages=[{"role": "user", "content": prompt}],
+        res = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {os.environ['COACH_API_KEY']}"},
+            json={
+                "model": model,
+                "messages": [{"role": "system", "content": COACH_SYSTEM}, {"role": "user", "content": prompt}],
+            },
+            timeout=45,  # a combo may try several providers before one answers
         )
-    except anthropic.APIError as exc:
-        log.warning("Claude coach call failed (%s), using the rule-based text", type(exc).__name__)
+        res.raise_for_status()
+        text = (res.json()["choices"][0]["message"]["content"] or "").strip()
+    except (requests.RequestException, ValueError, KeyError, IndexError, TypeError) as exc:
+        log.warning("AI coach call failed (%s), using the rule-based text", type(exc).__name__)
         return None
-    if response.stop_reason in ("refusal", "max_tokens"):
-        log.warning("Claude coach stopped with %s, using the rule-based text", response.stop_reason)
-        return None
-    text = "".join(block.text for block in response.content if block.type == "text").strip()
     if not text:
         return None
-    if len(_claude_cache) > 256:
-        _claude_cache.clear()
-    _claude_cache[key] = text
+    if len(_ai_cache) > 256:
+        _ai_cache.clear()
+    _ai_cache[prompt] = text
     return text
 
 
 def coach_facts(db: Session, briefing: CoachBriefingResponse) -> str:
-    """The person's figures as JSON for Claude. Sorted keys keep it stable, so unchanged data hits the cache."""
+    """The person's figures as JSON for the AI model. Sorted keys keep it stable, so unchanged data hits the cache."""
     products = [p for p in db.query(Product).all() if protein_per_euro(p) > 0]
     meals = todays_meals(db, briefing.user_id)
     return json.dumps(
@@ -516,10 +519,9 @@ def generate_coach_briefing(
         data_quality_notes=data_quality_notes(behaviour, predictive, gamification),
     )
     if narrate:
-        briefing.headline = ask_claude(
+        briefing.headline = ask_ai(
             f"Data:\n{coach_facts(db, briefing)}\n\n"
-            "In one sentence of at most 20 words, tell this person the single most useful thing to do today.",
-            "low",
+            "In one sentence of at most 20 words, tell this person the single most useful thing to do today."
         ) or briefing.headline
     return briefing
 
@@ -563,10 +565,10 @@ def answer_coach_question(
         actions = briefing.action_plan[:3]
         sources = ["coach briefing", "behaviour analytics", "predictive analytics", "recommendations"]
 
-    reply = ask_claude(f"Data:\n{coach_facts(db, briefing)}\n\nQuestion: {question}", "medium")
+    reply = ask_ai(f"Data:\n{coach_facts(db, briefing)}\n\nQuestion: {question}")
     if reply:
         answer = reply
-        sources = [f"Claude ({COACH_MODEL})", *sources]
+        sources = [f"AI coach ({coach_model()})", *sources]
 
     return CoachAnswerResponse(
         user_id=user_id,

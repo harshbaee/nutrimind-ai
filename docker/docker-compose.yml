@@ -19,7 +19,10 @@ services:
       dockerfile: docker/backend.Dockerfile
     environment:
       DATABASE_URL: postgresql://nutrimind:nutrimind@db:5432/nutrimind
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-} # optional: turns on the Claude coach
+      # Optional AI coach. Inside the container, an OmniRoute on your machine is host.docker.internal.
+      COACH_API_KEY: ${COACH_API_KEY:-}
+      COACH_MODEL: ${COACH_MODEL:-}
+      COACH_API_BASE_URL: ${COACH_API_BASE_URL:-http://host.docker.internal:20128/v1}
     ports:
       - "8000:8000"
     depends_on:
