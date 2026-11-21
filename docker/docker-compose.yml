@@ -1,0 +1,29 @@
+# API + Postgres. Run from the repo root: docker compose -f docker/docker-compose.yml up --build
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nutrimind
+      POSTGRES_PASSWORD: nutrimind # local only; use a real secret on a host
+      POSTGRES_DB: nutrimind
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nutrimind"]
+      interval: 2s
+      retries: 15
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    environment:
+      DATABASE_URL: postgresql://nutrimind:nutrimind@db:5432/nutrimind
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

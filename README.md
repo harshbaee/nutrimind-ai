@@ -49,6 +49,25 @@ Tests (seed a throwaway SQLite DB and hit every endpoint except the live OpenFoo
 .\.venv\Scripts\python -m pytest backend\tests
 ```
 
+## Deploy
+
+API with Postgres, in Docker (seeds the demo user on first start):
+
+```powershell
+docker compose -f docker/docker-compose.yml up --build
+```
+
+On a container host (Render, Railway, Fly), build `docker/backend.Dockerfile` from the repo root and set `DATABASE_URL`; the image listens on `$PORT`.
+
+Frontend: the build targets Cloudflare Workers (`frontend/wrangler.jsonc`). Point it at the deployed API at build time:
+
+```powershell
+cd frontend
+$env:VITE_API_BASE_URL = "https://your-api.example.com"
+npm run build
+npx wrangler deploy
+```
+
 ## Project Structure
 - `backend/api/` – FastAPI routers
 - `backend/services/` – recommendation, optimiser, behavioural, predictive, gamification, coach logic
