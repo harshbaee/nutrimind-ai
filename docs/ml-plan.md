@@ -16,7 +16,7 @@ NutriMind's AI features (meal photo recognition, the coach's answers, matching f
 ## Setup on the GPU laptop
 
 1. Install the NVIDIA driver, Python 3.12, Git, and Claude Code.
-2. `git clone https://github.com/harshbaee/nutrimind-ai.git` and open it with Claude Code. `CLAUDE.md` there carries the project rules.
+2. Copy the project folder over (it was handed over as a folder, with its git history inside) and open it with Claude Code. `CLAUDE.md` there carries the project rules. There is no `.env`, so the backend uses a local SQLite file; run `backend\database\seed_demo.py` once for the demo account.
 3. Create `.venv`, install PyTorch with CUDA from download.pytorch.org (pick the CUDA build the installed driver supports), then `ml/requirements.txt`.
 4. First script to write and run: `ml/check_gpu.py`, which prints the GPU name, VRAM and a tiny forward/backward pass, so a long run never starts on the CPU by mistake.
 5. Keep datasets and Hugging Face caches on a drive with room (set `HF_HOME`), not on a nearly full C:.
