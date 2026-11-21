@@ -109,8 +109,8 @@ npx wrangler deploy
 - [x] AI nutrition coach
 - [x] Meal cost estimation
 - [x] Nutrition forecasting
-- [ ] Food image recognition
-- [ ] Grocery price comparison
+- [x] Food image recognition (via your OmniRoute vision model)
+- [x] Grocery price comparison (Open Food Facts' Open Prices)
 - [ ] Mobile application
 
 🚧 Currently under active development.

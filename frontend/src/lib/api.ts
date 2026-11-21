@@ -397,6 +397,9 @@ export type ShoppingList = { user_id: number; items: ShoppingItem[]; total_eur: 
 
 export type PhotoFood = { name: string; grams: number; product_id: number | null; product_name: string | null };
 
+export type ShopPrice = { shop: string; city: string | null; price_eur: number; date: string; discounted: boolean };
+export type PriceComparison = { product_id: number; your_price_eur: number | null; shops: ShopPrice[] };
+
 export type NewUser = Omit<User, "id" | "created_at"> & { password: string };
 export type AuthResponse = { token: string; user: User };
 
@@ -462,6 +465,7 @@ export const api = {
   barcode: (code: string) => request<FoodSearchResult>(`/food/barcode/${encodeURIComponent(code)}`),
   repeatMeal: (mealId: number) => request<unknown>(`/meals/${mealId}/repeat`, { method: "POST" }),
   shoppingList: (userId: number) => request<ShoppingList>(`/analytics/shopping-list/${userId}`),
+  comparePrices: (productId: number) => request<PriceComparison>(`/food/${productId}/prices`),
   mealPhoto: (image: string) =>
     request<{ foods: PhotoFood[] }>("/food/photo", { method: "POST", body: JSON.stringify({ image }) }),
   dailySummary: (userId: number) =>

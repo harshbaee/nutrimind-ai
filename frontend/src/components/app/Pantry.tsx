@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { Fragment, useEffect, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, type FoodSearchResult, type SavedProduct } from "@/lib/api";
 import { useRefreshUserData, useSaved, useShoppingList } from "@/hooks/useNutriQueries";
 import { fmtEur } from "@/lib/format";
-import { Receipt, Section, round } from "./parts";
+import { Receipt, Section, round, shortDate } from "./parts";
 import { Scanner, canScan } from "./Scanner";
 
 const BARCODE = /^\d{6,14}$/;
@@ -52,6 +52,25 @@ export function Pantry({ userId }: { userId?: number }) {
   const results = lookup.data ? [lookup.data] : (search.data?.results ?? []);
 
   const shop = useShoppingList(userId).data;
+
+  // Shelf prices for one food at a time, from Open Food Facts' crowd-sourced Open Prices.
+  const [comparing, setComparing] = useState<number>();
+  const prices = useQuery({
+    queryKey: ["prices", comparing],
+    queryFn: () => api.comparePrices(comparing!),
+    enabled: comparing !== undefined,
+    staleTime: 60 * 60 * 1000,
+    retry: false,
+  });
+  const adoptPrice = useMutation({
+    mutationFn: ({ id, price }: { id: number; price: number }) => api.updatePrice(id, { estimated_price_eur: price }),
+    onSuccess: () => {
+      toast.success("Price updated");
+      refresh(userId);
+      prices.refetch();
+    },
+    onError: (e: Error) => toast.error(`Couldn't save the price. ${e.message}`),
+  });
   const add = useMutation({
     mutationFn: (r: FoodSearchResult) =>
       api.saveProduct({
@@ -122,7 +141,8 @@ export function Pantry({ userId }: { userId?: number }) {
                     </td>
                   </tr>
                 ) : (
-                  <tr key={p.id}>
+                  <Fragment key={p.id}>
+                  <tr>
                     <td>
                       {p.name}
                       {p.brand ? <span className="np-food-pack">{p.brand}</span> : null}
@@ -146,8 +166,60 @@ export function Pantry({ userId }: { userId?: number }) {
                       >
                         {p.estimated_price_eur != null ? "Edit" : "Add price"}
                       </button>
+                      {p.barcode && /^\d+$/.test(p.barcode) ? (
+                        <>
+                          {" · "}
+                          <button
+                            type="button"
+                            className="na-text-btn"
+                            aria-expanded={comparing === p.id}
+                            aria-label={`Compare shop prices for ${p.name}`}
+                            onClick={() => setComparing(comparing === p.id ? undefined : p.id)}
+                          >
+                            {comparing === p.id ? "Hide" : "Compare"}
+                          </button>
+                        </>
+                      ) : null}
                     </td>
                   </tr>
+                  {comparing === p.id ? (
+                    <tr>
+                      <td colSpan={5}>
+                        {prices.isPending ? (
+                          <p className="na-caption">Looking up shop prices…</p>
+                        ) : prices.error ? (
+                          <p className="na-caption" role="alert">{prices.error.message.startsWith("502") ? "Open Prices can't be reached right now. Try again shortly." : `Couldn't load prices. ${prices.error.message}`}</p>
+                        ) : !prices.data?.shops.length ? (
+                          <p className="na-caption">No shop has reported a price for this food in the last six months.</p>
+                        ) : (
+                          <ul className="na-rows">
+                            {prices.data.shops.map((s) => (
+                              <li key={`${s.shop}-${s.city}`}>
+                                <span>
+                                  {s.shop}
+                                  <small className="num">
+                                    {[s.city, `seen ${shortDate(s.date)}`, s.discounted ? "on offer" : ""].filter(Boolean).join(" · ")}
+                                  </small>
+                                </span>
+                                <span className="num">
+                                  {fmtEur(s.price_eur)}{" "}
+                                  {p.estimated_price_eur !== s.price_eur ? (
+                                    <button type="button" className="na-text-btn" disabled={adoptPrice.isPending} onClick={() => adoptPrice.mutate({ id: p.id, price: s.price_eur })}>
+                                      Use this price
+                                    </button>
+                                  ) : (
+                                    <small>your price</small>
+                                  )}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <p className="na-caption">Prices reported by shoppers to Open Food Facts' Open Prices, for the pack this barcode identifies.</p>
+                      </td>
+                    </tr>
+                  ) : null}
+                  </Fragment>
                 );
               })}
             </tbody>

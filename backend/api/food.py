@@ -9,6 +9,7 @@ from database.database import get_db
 from models.models import Product
 from schemas import MealPhoto, ProductCreate, ProductPriceUpdate, ProductResponse, ProductUpdate
 from services.photo import recognise_meal, vision_model
+from services.prices import shop_prices
 
 router = APIRouter()
 
@@ -158,6 +159,20 @@ def save_product(product: ProductCreate, request: Request, db: Session = Depends
 
     db.refresh(new_product)
     return {"message": "Product saved", "id": new_product.id, "product": new_product}
+
+
+@router.get("/{product_id}/prices")
+def compare_prices(product_id: int, db: Session = Depends(get_db)):
+    """What shops charge for this food, from Open Food Facts' crowd-sourced Open Prices."""
+    product = get_product_or_404(product_id, db)
+    if not product.barcode or not product.barcode.isdigit():
+        raise HTTPException(status_code=400, detail="Prices can only be compared for foods with a barcode")
+    try:
+        shops = shop_prices(product.barcode)
+    except requests.RequestException:
+        raise HTTPException(status_code=502, detail="Open Prices can't be reached right now. Try again shortly.")
+    yours = float(product.estimated_price_eur) if product.estimated_price_eur is not None else None
+    return {"product_id": product.id, "your_price_eur": yours, "shops": shops}
 
 
 @router.get("/{product_id}", response_model=ProductResponse)

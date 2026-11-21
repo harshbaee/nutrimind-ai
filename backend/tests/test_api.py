@@ -379,3 +379,37 @@ def test_photo_foods_are_matched_to_your_pantry(monkeypatch):
     assert foods[1]["product_id"] is None  # not in the pantry: shown, but not added
     content = sent[-1]["json"]["messages"][0]["content"]
     assert content[1] == {"type": "image_url", "image_url": {"url": TINY_JPEG}}
+
+
+def test_price_comparison_keeps_each_shops_latest_recent_pack_price():
+    from services.prices import latest_per_shop
+    shop = lambda name, city="Lyon": {"osm_name": name, "osm_address_city": city}
+    items = [  # newest first, as Open Prices returns them
+        {"price": 2.10, "currency": "EUR", "date": "2026-11-10", "location": shop("Lidl")},
+        {"price": 1.80, "currency": "EUR", "date": "2026-10-01", "location": shop("Lidl")},  # older: ignored
+        {"price": 1.99, "currency": "EUR", "date": "2026-11-01", "location": shop("Aldi"), "price_is_discounted": True},
+        {"price": 9.50, "currency": "EUR", "date": "2026-11-02", "location": shop("Monoprix"), "price_per": "KILOGRAM"},
+        {"price": 3.00, "currency": "USD", "date": "2026-11-03", "location": shop("Walmart")},
+        {"price": 2.50, "currency": "EUR", "date": "2025-01-01", "location": shop("Casino")},  # too old
+        {"price": 0, "currency": "EUR", "date": "2026-11-04", "location": shop("Broken")},
+    ]
+    assert latest_per_shop(items, today=date(2026, 11, 21)) == [
+        {"shop": "Aldi", "city": "Lyon", "price_eur": 1.99, "date": "2026-11-01", "discounted": True},
+        {"shop": "Lidl", "city": "Lyon", "price_eur": 2.10, "date": "2026-11-10", "discounted": False},
+    ]
+
+
+def test_price_comparison_route(monkeypatch):
+    from api import food
+    nutella = client.post("/food/save", json={"barcode": "3017620422003", "name": "Nutella", "estimated_price_eur": 4.50}).json()["id"]
+    monkeypatch.setattr(food, "shop_prices", lambda code: [{"shop": "Aldi", "city": None, "price_eur": 3.99, "date": "2026-11-01", "discounted": False}])
+    res = client.get(f"/food/{nutella}/prices").json()
+    assert (res["your_price_eur"], res["shops"][0]["price_eur"]) == (4.50, 3.99)
+
+    demo_food = next(p for p in client.get("/food/saved").json() if (p["barcode"] or "").startswith("DEMO"))
+    assert client.get(f"/food/{demo_food['id']}/prices").status_code == 400  # not a real barcode
+
+    def down(code):
+        raise food.requests.ConnectionError("offline")
+    monkeypatch.setattr(food, "shop_prices", down)
+    assert client.get(f"/food/{nutella}/prices").status_code == 502
