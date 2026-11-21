@@ -17,7 +17,7 @@ An AI-powered nutrition, meal cost & food optimisation platform. It answers "whi
 | 4 | Behavioural analytics (adherence scores, pattern flags) | [phase 4](docs/phase-4-behavioural-analytics.md) |
 | 5 | Predictive analytics (forecasts, anomalies, risk flags) | [phase 5](docs/phase-5-predictive-analytics.md) |
 | 6 | Gamified insights (streaks, badges, challenges) | [phase 6](docs/phase-6-gamified-insights.md) |
-| 7 | AI coach briefing + Q&A (deterministic, no LLM key needed) | [phase 7](docs/phase-7-ai-coach.md) |
+| 7 | AI coach briefing + Q&A: written by Claude when `ANTHROPIC_API_KEY` is set, rule-based otherwise | [phase 7](docs/phase-7-ai-coach.md) |
 
 ## Run locally (Windows / PowerShell)
 
@@ -32,6 +32,8 @@ cd backend
 ```
 
 API docs: http://127.0.0.1:8000/docs
+
+AI coach: set `ANTHROPIC_API_KEY` (in `.env` or the shell) and the coach's answers and daily headline are written by Claude (`claude-opus-5-5`) from your logged figures. That sends your goals, today's meals and saved foods to Anthropic. Without a key, or if a call fails, the coach uses its rule-based text.
 
 To use PostgreSQL instead, put `DATABASE_URL=postgresql://user:pass@localhost:5432/nutrimind` in `.env` at the repo root, then run the seed script (it creates the tables).
 

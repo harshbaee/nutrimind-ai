@@ -1,5 +1,9 @@
+import json
+import logging
+import os
 from datetime import datetime, time, timedelta
 
+import anthropic
 from sqlalchemy.orm import Session
 
 from models.models import Meal, Product, Recommendation, User
@@ -14,6 +18,81 @@ from services.behavioral import analyse_behaviour
 from services.gamification import analyse_gamification
 from services.predictive import analyse_predictive
 from services.recommendations import generate_user_recommendations, protein_per_euro
+
+
+log = logging.getLogger(__name__)
+
+COACH_MODEL = "claude-opus-5-5"
+COACH_SYSTEM = (
+    "You are NutriMind's nutrition coach. You help one person eat to their own protein, calorie and budget goals. "
+    "Use only the figures and foods in the data you are given; never invent foods, prices or numbers. "
+    "Prices are in euros. Reply in plain English, at most four short sentences, with no headings, lists or markdown. "
+    "Name a specific food from the data when it helps."
+)
+_claude_cache: dict[tuple[str, str], str] = {}
+
+
+def ask_claude(prompt: str, effort: str) -> str | None:
+    """Claude's reply, or None when ANTHROPIC_API_KEY is unset or the call fails, so callers keep the rule-based text."""
+    # Only an explicit key turns this on, so tests and dev shells with proxy credentials never call a model by accident.
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        return None
+    key = (prompt, effort)
+    if key in _claude_cache:
+        return _claude_cache[key]
+    try:
+        response = anthropic.Anthropic(timeout=30.0, max_retries=1).beta.messages.create(
+            model=COACH_MODEL,
+            max_tokens=16000,
+            system=COACH_SYSTEM,
+            output_config={"effort": effort},
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",  # a declined request is retried on a fallback model inside the same call
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except anthropic.APIError as exc:
+        log.warning("Claude coach call failed (%s), using the rule-based text", type(exc).__name__)
+        return None
+    if response.stop_reason in ("refusal", "max_tokens"):
+        log.warning("Claude coach stopped with %s, using the rule-based text", response.stop_reason)
+        return None
+    text = "".join(block.text for block in response.content if block.type == "text").strip()
+    if not text:
+        return None
+    if len(_claude_cache) > 256:
+        _claude_cache.clear()
+    _claude_cache[key] = text
+    return text
+
+
+def coach_facts(db: Session, briefing: CoachBriefingResponse) -> str:
+    """The person's figures as JSON for Claude. Sorted keys keep it stable, so unchanged data hits the cache."""
+    products = [p for p in db.query(Product).all() if protein_per_euro(p) > 0]
+    meals = todays_meals(db, briefing.user_id)
+    return json.dumps(
+        {
+            "briefing": briefing.model_dump(mode="json", exclude={"generated_at", "talking_points"}),
+            "todays_meals": [
+                {
+                    "name": m.name,
+                    "protein_g": round(as_float(m.total_protein), 1),
+                    "kcal": round(as_float(m.total_calories)),
+                    "cost_eur": round(as_float(m.total_cost_eur), 2),
+                }
+                for m in meals
+            ],
+            "saved_foods_best_protein_per_euro": [
+                {
+                    "name": p.name,
+                    "price_eur": as_float(p.estimated_price_eur),
+                    "protein_g_per_100g": as_float(p.protein_per_100g),
+                    "protein_g_per_euro": round(protein_per_euro(p), 1),
+                }
+                for p in sorted(products, key=protein_per_euro, reverse=True)[:8]
+            ],
+        },
+        sort_keys=True,
+    )
 
 
 def as_float(value) -> float:
@@ -375,6 +454,7 @@ def generate_coach_briefing(
     db: Session,
     user_id: int,
     days: int = 30,
+    narrate: bool = True,
 ) -> CoachBriefingResponse:
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -414,7 +494,7 @@ def generate_coach_briefing(
         else "Keep logging and maintain the current plan."
     )
 
-    return CoachBriefingResponse(
+    briefing = CoachBriefingResponse(
         user_id=user_id,
         generated_at=datetime.now(),
         focus_area=focus,
@@ -435,6 +515,13 @@ def generate_coach_briefing(
         talking_points=build_talking_points(actions, risks),
         data_quality_notes=data_quality_notes(behaviour, predictive, gamification),
     )
+    if narrate:
+        briefing.headline = ask_claude(
+            f"Data:\n{coach_facts(db, briefing)}\n\n"
+            "In one sentence of at most 20 words, tell this person the single most useful thing to do today.",
+            "low",
+        ) or briefing.headline
+    return briefing
 
 
 def answer_coach_question(
@@ -443,7 +530,7 @@ def answer_coach_question(
     question: str,
     days: int = 30,
 ) -> CoachAnswerResponse:
-    briefing = generate_coach_briefing(db, user_id, days)
+    briefing = generate_coach_briefing(db, user_id, days, narrate=False)
     question_lc = question.lower()
 
     if "budget" in question_lc or "cost" in question_lc or "spend" in question_lc:
@@ -475,6 +562,11 @@ def answer_coach_question(
         answer = briefing.headline
         actions = briefing.action_plan[:3]
         sources = ["coach briefing", "behaviour analytics", "predictive analytics", "recommendations"]
+
+    reply = ask_claude(f"Data:\n{coach_facts(db, briefing)}\n\nQuestion: {question}", "medium")
+    if reply:
+        answer = reply
+        sources = [f"Claude ({COACH_MODEL})", *sources]
 
     return CoachAnswerResponse(
         user_id=user_id,

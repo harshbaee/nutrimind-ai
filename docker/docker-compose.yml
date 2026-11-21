@@ -19,6 +19,7 @@ services:
       dockerfile: docker/backend.Dockerfile
     environment:
       DATABASE_URL: postgresql://nutrimind:nutrimind@db:5432/nutrimind
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-} # optional: turns on the Claude coach
     ports:
       - "8000:8000"
     depends_on:

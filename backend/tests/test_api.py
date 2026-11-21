@@ -7,6 +7,8 @@ from datetime import date, timedelta
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Must be set before the database module is imported.
 os.environ["DATABASE_URL"] = "sqlite:///" + os.path.join(tempfile.mkdtemp(), "test.sqlite3")
+os.environ.pop("ANTHROPIC_API_KEY", None)  # tests never call a real model
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -78,6 +80,56 @@ def test_recommendations_generate():
 def test_coach_answers_question():
     res = client.post("/coach/ask?days=30", json={"user_id": USER_ID, "question": "How can I improve protein?"})
     assert res.status_code == 200
+    assert not any(s.startswith("Claude") for s in res.json()["sources"])  # no key: rule-based answer
+
+
+class FakeClaude:
+    """Stands in for anthropic.Anthropic; records each request and replies with fixed text."""
+    calls = []
+
+    def __init__(self, **_):
+        self.beta = self
+        self.messages = self
+
+    def create(self, **kwargs):
+        FakeClaude.calls.append(kwargs)
+        block = SimpleNamespace(type="text", text="Add 200 g of Skyr to close the gap.")
+        return SimpleNamespace(stop_reason="end_turn", content=[block])
+
+
+def test_coach_uses_claude_when_key_is_set(monkeypatch):
+    from services import coach
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(coach.anthropic, "Anthropic", FakeClaude)
+    coach._claude_cache.clear()
+    FakeClaude.calls.clear()
+
+    res = client.post("/coach/ask?days=30", json={"user_id": USER_ID, "question": "Cheapest protein?"}).json()
+    assert res["answer"] == "Add 200 g of Skyr to close the gap."
+    assert res["sources"][0] == "Claude (claude-opus-5-5)"
+    sent = FakeClaude.calls[-1]
+    assert sent["model"] == "claude-opus-5-5"
+    assert "Cheapest protein?" in sent["messages"][0]["content"]
+    assert "saved_foods_best_protein_per_euro" in sent["messages"][0]["content"]
+
+    briefing = client.get(f"/coach/briefing/{USER_ID}?days=30").json()
+    assert briefing["headline"] == "Add 200 g of Skyr to close the gap."
+
+
+def test_coach_falls_back_when_claude_fails(monkeypatch):
+    from services import coach
+
+    class Down(FakeClaude):
+        def create(self, **kwargs):
+            raise coach.anthropic.APIConnectionError(request=None)
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(coach.anthropic, "Anthropic", Down)
+    coach._claude_cache.clear()
+
+    res = client.post("/coach/ask?days=30", json={"user_id": USER_ID, "question": "How can I stay under budget?"})
+    assert res.status_code == 200
+    assert not res.json()["sources"][0].startswith("Claude")
 
 
 def test_rankings_use_cost_per_100g():
