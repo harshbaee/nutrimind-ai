@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, type FoodSearchResult, type SavedProduct } from "@/lib/api";
-import { useRefreshUserData, useSaved } from "@/hooks/useNutriQueries";
+import { useRefreshUserData, useSaved, useShoppingList } from "@/hooks/useNutriQueries";
 import { fmtEur } from "@/lib/format";
-import { Section, round } from "./parts";
+import { Receipt, Section, round } from "./parts";
+import { Scanner, canScan } from "./Scanner";
+
+const BARCODE = /^\d{6,14}$/;
 
 // Same formula as the backend: protein per 100 g divided by the cost of 100 g.
 const proteinPerEuro = (p: SavedProduct) =>
@@ -32,6 +35,23 @@ export function Pantry({ userId }: { userId?: number }) {
     mutationFn: () => api.searchFood(query.trim()),
     onError: (e: Error) => toast.error(`Search didn't work. ${e.message}`),
   });
+
+  const [code, setCode] = useState("");
+  const [scanning, setScanning] = useState(false);
+  const [scanOk, setScanOk] = useState(false);
+  useEffect(() => setScanOk(canScan()), []); // after hydration: the server can't know the browser's features
+  const lookup = useMutation({
+    mutationFn: (c: string) => api.barcode(c),
+    onError: (e: Error, c) =>
+      toast.error(e.message.startsWith("404") ? `No food found for barcode ${c}.` : `Barcode lookup didn't work. ${e.message}`),
+  });
+  const findBarcode = (c: string) => {
+    search.reset();
+    lookup.mutate(c);
+  };
+  const results = lookup.data ? [lookup.data] : (search.data?.results ?? []);
+
+  const shop = useShoppingList(userId).data;
   const add = useMutation({
     mutationFn: (r: FoodSearchResult) =>
       api.saveProduct({
@@ -139,25 +159,59 @@ export function Pantry({ userId }: { userId?: number }) {
         ground="na-white"
         title="Add a food"
         side={
-          <form
-            className="na-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (query.trim()) search.mutate();
-            }}
-          >
-            <label>
-              Search Open Food Facts
-              <input className="na-input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Greek yogurt" />
-            </label>
-            <button type="submit" className="na-ink-btn" disabled={!query.trim() || search.isPending}>
-              {search.isPending ? "Searching…" : "Search"}
-            </button>
-          </form>
+          <>
+            <form
+              className="na-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!query.trim()) return;
+                lookup.reset();
+                search.mutate();
+              }}
+            >
+              <label>
+                Search Open Food Facts
+                <input className="na-input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Greek yogurt" />
+              </label>
+              <button type="submit" className="na-ink-btn" disabled={!query.trim() || search.isPending}>
+                {search.isPending ? "Searching…" : "Search"}
+              </button>
+            </form>
+            <form
+              className="na-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (BARCODE.test(code)) findBarcode(code);
+              }}
+            >
+              <label>
+                Or a barcode
+                <input className="na-input num" inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} placeholder="3017620422003" />
+              </label>
+              <div className="na-row">
+                <button type="submit" className="na-ink-btn" disabled={!BARCODE.test(code) || lookup.isPending}>
+                  {lookup.isPending ? "Looking up…" : "Look up"}
+                </button>
+                {scanOk ? (
+                  <button type="button" className="na-text-btn" onClick={() => setScanning(true)}>Scan with the camera</button>
+                ) : null}
+              </div>
+            </form>
+            {scanning ? (
+              <Scanner
+                onClose={() => setScanning(false)}
+                onCode={(c) => {
+                  setScanning(false);
+                  setCode(c);
+                  findBarcode(c);
+                }}
+              />
+            ) : null}
+          </>
         }
       >
         <ul className="na-rows">
-          {(search.data?.results ?? []).map((r) => (
+          {results.map((r) => (
             <li key={r.barcode}>
               <span>
                 {r.name}
@@ -170,8 +224,33 @@ export function Pantry({ userId }: { userId?: number }) {
             </li>
           ))}
           {search.data && search.data.results.length === 0 ? <li>Nothing found for that search.</li> : null}
-          {!search.data ? <li>Search by name to add a food from the Open Food Facts database.</li> : null}
+          {!search.data && !lookup.data ? <li>Search by name or barcode to add a food from the Open Food Facts database.</li> : null}
         </ul>
+      </Section>
+
+      <Section
+        ground="np-receipt-sec"
+        title="Next week's shop"
+        side={<p className="np-note">Everything you logged in the last seven days, rounded up to the packs you'd buy. Eat the same next week and this is your list.</p>}
+      >
+        <div className="np-receipts">
+          <Receipt
+            title="Shopping list"
+            lines={(shop?.items ?? []).map((i) => ({
+              key: i.product_id,
+              name: i.name,
+              qty: i.packs && i.pack_size_g ? `${i.packs} × ${round(i.pack_size_g)} g` : `${round(i.grams)} g`,
+              amount: i.cost_eur,
+            }))}
+            empty="Log a few meals and your list appears here."
+            total={shop?.total_eur}
+            note={
+              shop?.unpriced
+                ? `${shop.unpriced} ${shop.unpriced === 1 ? "food has" : "foods have"} no price or pack size yet, so the total leaves ${shop.unpriced === 1 ? "it" : "them"} out.`
+                : "From your last seven days of meals."
+            }
+          />
+        </div>
       </Section>
     </>
   );

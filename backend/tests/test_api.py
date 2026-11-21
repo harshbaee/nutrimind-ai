@@ -187,3 +187,54 @@ def test_forecast_uses_mean_with_few_days_and_ignores_spikes():
     assert max(robust_z([v for _, v in with_spike])) > 3.5
     forecast, _ = forecast_metric(with_spike, [date(2026, 11, 10)], upper=None)
     assert forecast[0] < 2100  # the 5000 kcal day is reported, not learned
+
+
+def test_repeat_meal_logs_a_copy_now():
+    first = client.get(f"/meals/history/{USER_ID}").json()[-1]  # the oldest seeded meal
+    res = client.post(f"/meals/{first['id']}/repeat")
+    assert res.status_code == 201
+    copy = res.json()
+    assert copy["meal"]["name"] == first["name"]
+    assert copy["meal"]["id"] != first["id"]
+    assert copy["meal"]["total_protein"] == pytest.approx(first["total_protein"], abs=0.01)
+    assert copy["meal"]["logged_at"][:10] == date.today().isoformat()
+    assert client.post("/meals/999999/repeat").status_code == 404
+    client.delete(f"/meals/{copy['meal']['id']}")
+
+
+def test_shopping_list_rounds_up_to_whole_packs():
+    product = client.post("/food/save", json={
+        "name": "Test Lentils 500g", "protein_per_100g": 24, "calories_per_100g": 350,
+        "serving_size_g": 500, "estimated_price_eur": 1.20,
+    }).json()["id"]
+    meal = client.post("/meals/log", json={
+        "user_id": USER_ID, "name": "Lentil stew", "meal_type": "dinner",
+        "items": [{"product_id": product, "quantity_g": 700}],
+    }).json()["meal"]["id"]
+
+    shop = client.get(f"/analytics/shopping-list/{USER_ID}").json()
+    lentils = next(i for i in shop["items"] if i["product_id"] == product)
+    assert (lentils["grams"], lentils["packs"], lentils["cost_eur"]) == (700, 2, 2.40)  # 700 g needs two 500 g packs
+    assert shop["total_eur"] == pytest.approx(sum(i["cost_eur"] or 0 for i in shop["items"]), abs=0.01)
+    assert client.get("/analytics/shopping-list/999999").status_code == 404
+    client.delete(f"/meals/{meal}")
+
+
+def test_sign_up_creates_a_profile_and_rejects_duplicate_email():
+    body = {"name": "Sam", "email": "sam@example.com", "calorie_goal": 2400, "protein_goal": 140, "budget_weekly": 60}
+    res = client.post("/users/", json=body)
+    assert res.status_code == 201
+    assert res.json()["name"] == "Sam"
+    assert client.post("/users/", json=body).status_code == 409
+
+
+def test_barcode_lookup_parses_the_sdk_product(monkeypatch):
+    from api import food
+    sdk_product = {  # the SDK returns the product dict directly, or None when the barcode is unknown
+        "code": "3017620422003", "product_name": "Nutella", "brands": "Ferrero", "product_quantity": "400",
+        "nutriments": {"energy-kcal_100g": 539, "proteins_100g": 6.3, "carbohydrates_100g": 57.5, "fat_100g": 30.9},
+    }
+    monkeypatch.setattr(food.API.product, "get", lambda code, fields=None: sdk_product if code == "3017620422003" else None)
+    found = client.get("/food/barcode/3017620422003").json()
+    assert (found["name"], found["barcode"], found["protein_per_100g"], found["serving_size_g"]) == ("Nutella", "3017620422003", 6.3, 400)
+    assert client.get("/food/barcode/0000000000000").status_code == 404

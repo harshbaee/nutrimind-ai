@@ -384,6 +384,19 @@ export type CoachAnswer = {
   sources: string[];
 };
 
+export type ShoppingItem = {
+  product_id: number;
+  name: string;
+  grams: number;
+  pack_size_g: number | null;
+  packs: number | null;
+  cost_eur: number | null;
+};
+
+export type ShoppingList = { user_id: number; items: ShoppingItem[]; total_eur: number; unpriced: number };
+
+export type NewUser = Omit<User, "id" | "created_at">;
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
@@ -401,6 +414,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   listUsers: () => request<User[]>("/users/"),
+  createUser: (body: NewUser) => request<User>("/users/", { method: "POST", body: JSON.stringify(body) }),
+  barcode: (code: string) => request<FoodSearchResult>(`/food/barcode/${encodeURIComponent(code)}`),
+  repeatMeal: (mealId: number) => request<unknown>(`/meals/${mealId}/repeat`, { method: "POST" }),
+  shoppingList: (userId: number) => request<ShoppingList>(`/analytics/shopping-list/${userId}`),
   dailySummary: (userId: number) =>
     request<DailySummary>(`/nutrition/daily-summary/${userId}`),
   weeklySummary: (userId: number) =>

@@ -18,6 +18,7 @@ An AI-powered nutrition, meal cost & food optimisation platform. It answers "whi
 | 5 | Predictive analytics (forecasts, anomalies, risk flags) | [phase 5](docs/phase-5-predictive-analytics.md) |
 | 6 | Gamified insights (streaks, badges, challenges) | [phase 6](docs/phase-6-gamified-insights.md) |
 | 7 | AI coach briefing + Q&A: written by your AI model (via OmniRoute) when configured, rule-based otherwise | [phase 7](docs/phase-7-ai-coach.md) |
+| 8 | Everyday features: barcode lookup and camera scanning, "Log again" for past meals, next week's shopping list, sign-up for more profiles (no passwords yet) | this README |
 
 ## Run locally (Windows / PowerShell)
 

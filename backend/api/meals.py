@@ -215,6 +215,21 @@ def delete_meal(meal_id: int, db: Session = Depends(get_db)):
     return {"message": "Meal deleted", "meal_id": meal_id}
 
 
+@router.post("/{meal_id}/repeat", response_model=MealDetail, status_code=201)
+def repeat_meal(meal_id: int, db: Session = Depends(get_db)):
+    """Log a past meal again now, with the same foods and amounts at today's prices."""
+    meal = db.query(Meal).filter(Meal.id == meal_id).first()
+    if not meal:
+        raise HTTPException(status_code=404, detail="Meal not found")
+    logs = db.query(FoodLog).filter(FoodLog.meal_id == meal.id).all()
+    if not logs:
+        raise HTTPException(status_code=400, detail="That meal has no foods to repeat")
+    items = [FoodLogItemCreate(product_id=log.product_id, quantity_g=as_float(log.quantity_g)) for log in logs]
+    return log_meal(
+        MealCreate(user_id=meal.user_id, name=meal.name, meal_type=meal.meal_type or "snack", items=items), db
+    )
+
+
 @router.get("/{meal_id}", response_model=MealDetail)
 def get_meal_detail(meal_id: int, db: Session = Depends(get_db)):
     meal = db.query(Meal).filter(Meal.id == meal_id).first()

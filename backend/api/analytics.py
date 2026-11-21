@@ -1,10 +1,13 @@
+import math
+from datetime import date, datetime, time, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database.database import get_db
-from models.models import SpendingHistory, Meal, User
+from models.models import FoodLog, Product, SpendingHistory, Meal, User
 from schemas import (
     BehaviourAnalyticsResponse,
     GamificationAnalyticsResponse,
@@ -34,6 +37,44 @@ def spending_overview(user_id: int, db: Session = Depends(get_db)):
             for r in records
         ]
     }
+
+@router.get("/shopping-list/{user_id}")
+def shopping_list(user_id: int, db: Session = Depends(get_db)):
+    """What to buy for a week like the last one: every food logged in the past 7 days, rounded up to whole packs."""
+    if not db.query(User).filter(User.id == user_id).first():
+        raise HTTPException(status_code=404, detail="User not found")
+    since = datetime.combine(date.today() - timedelta(days=6), time.min)
+    rows = (
+        db.query(Product, func.sum(FoodLog.quantity_g))
+        .join(FoodLog, FoodLog.product_id == Product.id)
+        .join(Meal, Meal.id == FoodLog.meal_id)
+        .filter(Meal.user_id == user_id, Meal.logged_at >= since)
+        .group_by(Product.id)
+        .all()
+    )
+    items = []
+    for product, grams in rows:
+        grams = float(grams or 0)
+        pack = float(product.serving_size_g or 0)  # the amount the price buys
+        packs = math.ceil(round(grams / pack, 6)) if pack else None
+        price = product.estimated_price_eur
+        cost = round(packs * float(price), 2) if packs and price is not None else None
+        items.append({
+            "product_id": product.id,
+            "name": product.name,
+            "grams": round(grams),
+            "pack_size_g": pack or None,
+            "packs": packs,
+            "cost_eur": cost,
+        })
+    items.sort(key=lambda i: (i["cost_eur"] is None, -(i["cost_eur"] or 0)))
+    return {
+        "user_id": user_id,
+        "items": items,
+        "total_eur": round(sum(i["cost_eur"] or 0 for i in items), 2),
+        "unpriced": sum(1 for i in items if i["cost_eur"] is None),
+    }
+
 
 @router.get("/meal-types/{user_id}")
 def meal_type_breakdown(user_id: int, db: Session = Depends(get_db)):

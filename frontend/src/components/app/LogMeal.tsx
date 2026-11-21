@@ -1,8 +1,9 @@
 import { useState, type RefObject } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
-import { useRefreshUserData, useSaved } from "@/hooks/useNutriQueries";
+import { api, type MealHistoryItem } from "@/lib/api";
+import { useHistory, useRefreshUserData, useSaved } from "@/hooks/useNutriQueries";
+import { fmtEur } from "@/lib/format";
 import { Receipt, round } from "./parts";
 
 // The most frequent job: a side panel where the meal builds up as a receipt before it is logged.
@@ -27,6 +28,19 @@ export function LogMeal({ dialog, userId }: { dialog: RefObject<HTMLDialogElemen
     onError: (e: Error) => toast.error(`Couldn't log the meal. ${e.message}`),
   });
 
+  // Past meals work as templates: the latest of each name, logged again in one tap.
+  const history = useHistory(userId).data ?? [];
+  const recent = history.filter((m, i) => history.findIndex((x) => x.name === m.name) === i).slice(0, 4);
+  const again = useMutation({
+    mutationFn: (m: MealHistoryItem) => api.repeatMeal(m.id),
+    onSuccess: (_, m) => {
+      toast.success(`${m.name} logged again`);
+      refresh(userId);
+      dialog.current?.close();
+    },
+    onError: (e: Error) => toast.error(`Couldn't log that meal again. ${e.message}`),
+  });
+
   const lines = items.map((it, i) => {
     const f = foods.find((p) => p.id === it.product_id);
     const cost = f?.estimated_price_eur && f.serving_size_g ? (f.estimated_price_eur / f.serving_size_g) * it.quantity_g : null;
@@ -39,6 +53,25 @@ export function LogMeal({ dialog, userId }: { dialog: RefObject<HTMLDialogElemen
         <h2 id="log-title" className="np-h2">Log a meal</h2>
         <button type="button" className="na-text-btn" onClick={() => dialog.current?.close()}>Close</button>
       </div>
+
+      {recent.length ? (
+        <section className="na-again" aria-labelledby="again-title">
+          <h3 id="again-title">Eat it again</h3>
+          <ul className="na-rows">
+            {recent.map((m) => (
+              <li key={m.id}>
+                <span>
+                  {m.name}
+                  <small className="num">{round(m.total_protein)} g protein · {fmtEur(m.total_cost_eur)}</small>
+                </span>
+                <button type="button" className="na-ink-btn" disabled={!userId || again.isPending} onClick={() => again.mutate(m)}>
+                  Log again
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <form
         className="na-form"

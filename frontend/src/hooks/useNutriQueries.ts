@@ -15,6 +15,7 @@ export const qk = {
   predictive: (uid: number) => ["predictive", uid] as const,
   gamification: (uid: number) => ["gamification", uid] as const,
   coach: (uid: number) => ["coach", uid] as const,
+  shopping: (uid: number) => ["shopping", uid] as const,
 };
 
 export function useUsers() {
@@ -97,6 +98,10 @@ export function useCoachBriefing(uid?: number) {
   });
 }
 
+export function useShoppingList(uid?: number) {
+  return useQuery({ queryKey: qk.shopping(uid!), queryFn: () => api.shoppingList(uid!), enabled: !!uid });
+}
+
 export function useRefreshUserData() {
   const qc = useQueryClient();
   return (uid?: number) => {
@@ -111,6 +116,7 @@ export function useRefreshUserData() {
       qc.invalidateQueries({ queryKey: qk.predictive(uid) });
       qc.invalidateQueries({ queryKey: qk.gamification(uid) });
       qc.invalidateQueries({ queryKey: qk.coach(uid) });
+      qc.invalidateQueries({ queryKey: qk.shopping(uid) });
     }
     qc.invalidateQueries({ queryKey: qk.saved });
     qc.invalidateQueries({ queryKey: qk.rankings });

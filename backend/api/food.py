@@ -103,9 +103,10 @@ def get_by_barcode(barcode: str, db: Session = Depends(get_db)):
             "code", "product_name", "brands", "nutriments",
             "product_quantity", "categories", "nutriscore_grade", "nova_group"
         ])
-        if not result or result.get("status") == 0:
+        # The SDK returns the product itself (not the raw API's {"status", "product"} wrapper), or None.
+        if not result:
             raise HTTPException(status_code=404, detail="Product not found")
-        return parse_product(result.get("product", {}))
+        return parse_product(result)
     except HTTPException:
         raise
     except requests.RequestException as e:

@@ -11,6 +11,17 @@ import { Plan } from "@/components/app/Plan";
 import { Pantry } from "@/components/app/Pantry";
 import { Progress } from "@/components/app/Progress";
 import { LogMeal } from "@/components/app/LogMeal";
+import { SignUp } from "@/components/app/SignUp";
+
+// The chosen profile is remembered per browser; storage can be blocked, so it's only a convenience.
+const PROFILE_KEY = "nutrimind-profile";
+const savedProfile = () => {
+  try {
+    return Number(localStorage.getItem(PROFILE_KEY)) || undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -44,10 +55,21 @@ function App() {
   const [userId, setUserId] = useState<number>();
   const [screen, setScreen] = useState<Screen>("today");
   const logDialog = useRef<HTMLDialogElement>(null);
+  const signUpDialog = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
-    if (!userId && users.data?.length) setUserId(users.data[0].id);
+    if (userId || !users.data?.length) return;
+    const saved = savedProfile();
+    setUserId(users.data.some((u) => u.id === saved) ? saved : users.data[users.data.length - 1].id);
   }, [users.data, userId]);
+  const chooseProfile = (id: number) => {
+    setUserId(id);
+    try {
+      localStorage.setItem(PROFILE_KEY, String(id));
+    } catch {
+      // blocked storage: the choice just won't survive a reload
+    }
+  };
 
   // The open screen lives in the address (?screen=plan), so it can be linked to and survives a reload.
   useEffect(() => {
@@ -114,10 +136,11 @@ function App() {
             className="na-profile"
             aria-label="Profile"
             value={userId ?? ""}
-            onChange={(e) => setUserId(Number(e.target.value))}
-            disabled={!users.data?.length}
+            onChange={(e) => (e.target.value === "new" ? signUpDialog.current?.showModal() : chooseProfile(Number(e.target.value)))}
+            disabled={!users.data}
           >
             {users.data?.map((u) => <option key={u.id} value={u.id}>{u.name}</option>) ?? <option value="">Loading…</option>}
+            {users.data ? <option value="new">New profile…</option> : null}
           </select>
           <button type="button" className="np-btn" onClick={openLog}>Log a meal</button>
         </div>
@@ -138,6 +161,7 @@ function App() {
       </main>
 
       <LogMeal dialog={logDialog} userId={userId} />
+      <SignUp dialog={signUpDialog} onCreated={(u) => chooseProfile(u.id)} />
     </div>
   );
 }
