@@ -1,6 +1,6 @@
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
-from statistics import mean, pstdev
+from statistics import mean, median
 
 from sqlalchemy.orm import Session
 
@@ -33,30 +33,82 @@ def clamp(value: float, lower: float = 0, upper: float | None = None) -> float:
     return value
 
 
-def linear_prediction(
-    indexed_values: list[tuple[int, float]],
-    target_index: int,
-    fallback: float,
-    upper: float | None = None,
-) -> float:
-    if len(indexed_values) < 3:
-        return round(clamp(fallback, upper=upper), 2)
+# Forecasting. Each model is fitted on one user's logged days (date, value) and predicts a logged day's value
+# for target dates. Unlogged days are gaps, not zeros. select_model() picks, per metric, the model with the
+# lowest one-step-ahead error when replayed over the user's own recent history.
+Points = list[tuple[date, float]]
 
-    xs = [point[0] for point in indexed_values]
-    ys = [point[1] for point in indexed_values]
-    x_avg = mean(xs)
-    y_avg = mean(ys)
-    denominator = sum((x - x_avg) ** 2 for x in xs)
-    if denominator == 0:
-        return round(clamp(fallback, upper=upper), 2)
 
-    slope = sum((x - x_avg) * (y - y_avg) for x, y in indexed_values) / denominator
-    intercept = y_avg - slope * x_avg
-    trend_value = intercept + slope * target_index
+def forecast_mean(history: Points, targets: list[date]) -> list[float]:
+    level = mean(v for _, v in history)
+    return [level] * len(targets)
 
-    # Blend the trend with the logged-day average so a tiny demo dataset does not swing wildly.
-    blended = (trend_value * 0.55) + (fallback * 0.45)
-    return round(clamp(blended, upper=upper), 2)
+
+def forecast_weekday(history: Points, targets: list[date], shrink: float = 2.0) -> list[float]:
+    """Mean per day of the week, pulled toward the overall mean when that weekday has few logs."""
+    overall = mean(v for _, v in history)
+    by_day: dict[int, list[float]] = defaultdict(list)
+    for d, v in history:
+        by_day[d.weekday()].append(v)
+
+    def estimate(wd: int) -> float:
+        vals = by_day.get(wd, [])
+        return (sum(vals) + shrink * overall) / (len(vals) + shrink)
+
+    return [estimate(t.weekday()) for t in targets]
+
+
+def forecast_damped_trend(
+    history: Points, targets: list[date], alpha: float = 0.3, beta: float = 0.1, phi: float = 0.9
+) -> list[float]:
+    """Holt's linear smoothing with a damped trend, so a recent rise levels off instead of running away."""
+    values = [v for _, v in history]
+    # Start from a straight line fitted to the first week: two noisy days make a bad starting trend.
+    first = values[:7]
+    x_avg, y_avg = (len(first) - 1) / 2, mean(first)
+    spread = sum((x - x_avg) ** 2 for x in range(len(first)))
+    trend = sum((x - x_avg) * (y - y_avg) for x, y in enumerate(first)) / spread if spread else 0.0
+    level = y_avg + trend * (len(first) - 1 - x_avg)
+    for v in values[len(first):]:
+        previous = level
+        level = alpha * v + (1 - alpha) * (level + phi * trend)
+        trend = beta * (level - previous) + (1 - beta) * phi * trend
+    out, damping = [], 0.0
+    for h in range(1, len(targets) + 1):
+        damping += phi**h
+        out.append(level + damping * trend)
+    return out
+
+
+MODELS = {"mean": forecast_mean, "weekday": forecast_weekday, "damped_trend": forecast_damped_trend}
+MIN_POINTS_TO_SELECT = 6  # below this there are too few replays to tell models apart
+
+
+def backtest_mae(model, history: Points, replays: int = 10) -> float:
+    """Mean absolute error of one-step-ahead predictions over the last `replays` logged days."""
+    start = max(3, len(history) - replays)
+    errors = [abs(model(history[:i], [history[i][0]])[0] - history[i][1]) for i in range(start, len(history))]
+    return mean(errors)
+
+
+SWITCH_MARGIN = 0.9  # leave the plain mean only for a model with at least 10% lower backtest error
+
+
+def select_model(history: Points) -> str:
+    if len(history) < MIN_POINTS_TO_SELECT:
+        return "mean"
+    scores = {name: backtest_mae(model, history, replays=len(history)) for name, model in MODELS.items()}
+    best = min(scores, key=scores.get)
+    return best if scores[best] < scores["mean"] * SWITCH_MARGIN else "mean"
+
+
+def forecast_metric(history: Points, targets: list[date], upper: float | None) -> tuple[list[float], str]:
+    if not history:
+        return [0.0] * len(targets), "mean"
+    # One-off spikes (a party, a holiday meal) are reported as anomalies, not learned as the new normal.
+    history = [p for p, z in zip(history, robust_z([v for _, v in history])) if abs(z) <= ROBUST_Z_LIMIT]
+    name = select_model(history)
+    return [round(clamp(v, upper=upper), 2) for v in MODELS[name](history, targets)], name
 
 
 def build_anomalies(
@@ -70,36 +122,24 @@ def build_anomalies(
         return anomalies
 
     calories = [point[1] for point in logged_points]
-    proteins = [point[2] for point in logged_points]
     costs = [point[3] for point in logged_points]
+    calorie_z, cost_z = robust_z(calories), robust_z(costs)
+    calorie_median, cost_median = median(calories), median(costs)
 
-    calorie_avg = mean(calories)
-    calorie_std = pstdev(calories) if len(calories) > 1 else 0
-    cost_avg = mean(costs)
-    cost_std = pstdev(costs) if len(costs) > 1 else 0
-
-    calorie_high_threshold = max(
-        calorie_goal * 1.30 if calorie_goal else 0,
-        calorie_avg + max(calorie_std * 1.75, 250),
-    )
     calorie_low_threshold = calorie_goal * 0.50 if calorie_goal else 0
-    cost_threshold = (
-        daily_budget * 1.25
-        if daily_budget
-        else cost_avg + max(cost_std * 1.75, 2.5)
-    )
+    cost_budget_threshold = daily_budget * 1.25 if daily_budget else 0
     protein_low_threshold = protein_goal * 0.65 if protein_goal else 0
 
-    for point_date, calorie_value, protein_value, cost_value in logged_points:
-        if calorie_high_threshold and calorie_value > calorie_high_threshold:
+    for i, (point_date, calorie_value, protein_value, cost_value) in enumerate(logged_points):
+        if calorie_z[i] > ROBUST_Z_LIMIT:
             anomalies.append(
                 PredictiveAnomaly(
                     date=point_date,
                     metric="calories",
                     value=round(calorie_value, 2),
-                    expected_value=round(calorie_avg, 2),
+                    expected_value=round(calorie_median, 2),
                     severity="warning",
-                    message="Calorie intake is materially above the recent baseline.",
+                    message="Calorie intake is materially above your usual day.",
                 )
             )
         elif calorie_low_threshold and calorie_value < calorie_low_threshold:
@@ -126,19 +166,42 @@ def build_anomalies(
                 )
             )
 
-        if cost_threshold and cost_value > cost_threshold:
+        over_budget = bool(cost_budget_threshold and cost_value > cost_budget_threshold)
+        if over_budget or cost_z[i] > ROBUST_Z_LIMIT:
             anomalies.append(
                 PredictiveAnomaly(
                     date=point_date,
                     metric="cost",
                     value=round(cost_value, 2),
-                    expected_value=round(daily_budget or cost_avg, 2),
+                    expected_value=round(daily_budget if over_budget else cost_median, 2),
                     severity="warning",
-                    message="Food spend is above the expected daily baseline.",
+                    message=(
+                        "Food spend is well above the daily budget."
+                        if over_budget
+                        else "Food spend is materially above your usual day."
+                    ),
                 )
             )
 
     return anomalies[:10]
+
+
+ROBUST_Z_LIMIT = 3.5  # Iglewicz and Hoaglin's cut-off for the modified z-score
+MIN_POINTS_FOR_OUTLIERS = 5
+
+
+def robust_z(values: list[float]) -> list[float]:
+    """Modified z-scores from the median and the median absolute deviation, which one spike cannot drag
+    the way it drags a mean and standard deviation. Zeros when there are too few days to judge."""
+    if len(values) < MIN_POINTS_FOR_OUTLIERS:
+        return [0.0] * len(values)
+    centre = median(values)
+    mad = median(abs(v - centre) for v in values)
+    if mad:
+        return [0.6745 * (v - centre) / mad for v in values]
+    # Over half the days are identical: fall back to the mean absolute deviation (Iglewicz and Hoaglin).
+    mean_ad = mean(abs(v - centre) for v in values)
+    return [(v - centre) / (1.253314 * mean_ad) if mean_ad else 0.0 for v in values]
 
 
 def build_insights(
@@ -289,11 +352,8 @@ def analyse_predictive(
 
     daily_points: list[PredictiveForecastPoint] = []
     logged_points: list[tuple[date, float, float, float]] = []
-    indexed_calories: list[tuple[int, float]] = []
-    indexed_protein: list[tuple[int, float]] = []
-    indexed_cost: list[tuple[int, float]] = []
 
-    for index, current_date in enumerate(date_range(period_start, period_end)):
+    for current_date in date_range(period_start, period_end):
         day_meals = meals_by_day.get(current_date, [])
         calories = round(sum(as_float(meal.total_calories) for meal in day_meals), 2)
         protein = round(sum(as_float(meal.total_protein) for meal in day_meals), 2)
@@ -310,9 +370,6 @@ def analyse_predictive(
 
         if day_meals:
             logged_points.append((current_date, calories, protein, cost))
-            indexed_calories.append((index, calories))
-            indexed_protein.append((index, protein))
-            indexed_cost.append((index, cost))
 
     calories_avg = mean([point[1] for point in logged_points]) if logged_points else 0
     protein_avg = mean([point[2] for point in logged_points]) if logged_points else 0
@@ -322,23 +379,19 @@ def analyse_predictive(
     protein_upper = max(protein_goal * 1.8, protein_avg * 2.4, 50) if protein_avg or protein_goal else None
     cost_upper = max(daily_budget * 2.5, cost_avg * 2.5, 10) if cost_avg or daily_budget else None
 
-    trend_ready = len(logged_points) >= 7 and (len(logged_points) / days) >= 0.45
-    calorie_series = indexed_calories if trend_ready else []
-    protein_series = indexed_protein if trend_ready else []
-    cost_series = indexed_cost if trend_ready else []
-
-    forecast: list[PredictiveForecastPoint] = []
-    for offset in range(1, horizon + 1):
-        target_index = days - 1 + offset
-        forecast_date = period_end + timedelta(days=offset)
-        forecast.append(
-            PredictiveForecastPoint(
-                date=forecast_date,
-                calories=linear_prediction(calorie_series, target_index, calories_avg, calories_upper),
-                protein=linear_prediction(protein_series, target_index, protein_avg, protein_upper),
-                cost_eur=linear_prediction(cost_series, target_index, cost_avg, cost_upper),
-            )
-        )
+    targets = [period_end + timedelta(days=offset) for offset in range(1, horizon + 1)]
+    calorie_forecast, calorie_model = forecast_metric([(p[0], p[1]) for p in logged_points], targets, calories_upper)
+    protein_forecast, protein_model = forecast_metric([(p[0], p[2]) for p in logged_points], targets, protein_upper)
+    cost_forecast, cost_model = forecast_metric([(p[0], p[3]) for p in logged_points], targets, cost_upper)
+    forecast = [
+        PredictiveForecastPoint(date=t, calories=c, protein=p, cost_eur=k)
+        for t, c, p, k in zip(targets, calorie_forecast, protein_forecast, cost_forecast)
+    ]
+    model_type = (
+        "average_baseline_v2"
+        if len(logged_points) < MIN_POINTS_TO_SELECT
+        else f"selected_v2 (calories: {calorie_model}, protein: {protein_model}, cost: {cost_model})"
+    )
 
     forecast_avg_cost = mean([point.cost_eur for point in forecast]) if forecast else 0
     forecast_avg_protein = mean([point.protein for point in forecast]) if forecast else 0
@@ -378,7 +431,7 @@ def analyse_predictive(
         period_start=period_start,
         period_end=period_end,
         horizon_days=horizon,
-        model_type="local_linear_trend_v1" if trend_ready else "local_average_baseline_v1",
+        model_type=model_type,
         daily=daily_points,
         forecast=forecast,
         anomalies=anomalies,

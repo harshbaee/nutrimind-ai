@@ -154,3 +154,36 @@ def test_oversized_inputs_are_rejected():
     meal = {"user_id": USER_ID, "name": "Huge", "meal_type": "lunch", "items": [{"product_id": 2, "quantity_g": 5001}]}
     assert client.post("/meals/log", json=meal).status_code == 422
     assert client.patch("/food/2/price", json={"estimated_price_eur": 1, "serving_size_g": 10000}).status_code == 422
+
+
+def daily_points(values, start=date(2026, 11, 2)):  # 2 Nov 2026 is a Monday
+    return [(start + timedelta(days=i), v) for i, v in enumerate(values)]
+
+
+def test_forecast_picks_weekday_model_for_weekend_pattern():
+    from services.predictive import forecast_metric
+    history = daily_points([2000 if (i % 7) < 5 else 3000 for i in range(28)])
+    saturday = date(2026, 11, 28)
+    forecast, model = forecast_metric(history, [saturday + timedelta(days=2), saturday], upper=None)
+    assert model == "weekday"
+    assert forecast[1] > forecast[0] + 500  # Saturday forecast well above Monday
+
+
+def test_forecast_picks_trend_model_for_steady_rise():
+    from services.predictive import forecast_metric
+    history = daily_points([1500 + 30 * i for i in range(20)])
+    forecast, model = forecast_metric(history, [date(2026, 11, 22)], upper=None)
+    assert model == "damped_trend"
+    # Follows the rise to near the last day (2,070), far above the 30-day mean (1,785); damping keeps it conservative.
+    assert forecast[0] == pytest.approx(1500 + 30 * 19, rel=0.05)
+
+
+def test_forecast_uses_mean_with_few_days_and_ignores_spikes():
+    from services.predictive import forecast_metric, robust_z
+    forecast, model = forecast_metric(daily_points([2000, 2100, 1900]), [date(2026, 11, 10)], upper=None)
+    assert (model, forecast[0]) == ("mean", 2000)
+
+    with_spike = daily_points([2000, 2050, 1950, 2000, 2020, 1980, 5000, 2010])
+    assert max(robust_z([v for _, v in with_spike])) > 3.5
+    forecast, _ = forecast_metric(with_spike, [date(2026, 11, 10)], upper=None)
+    assert forecast[0] < 2100  # the 5000 kcal day is reported, not learned

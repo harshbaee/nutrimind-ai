@@ -431,7 +431,7 @@ def data_quality_notes(behaviour, predictive, gamification) -> list[str]:
     notes: list[str] = []
     if behaviour.days_logged < 5:
         notes.append("Fewer than 5 logged days are available, so coaching confidence is still limited.")
-    if predictive.model_type == "local_average_baseline_v1":
+    if predictive.model_type.startswith("average_baseline"):
         notes.append("Forecasting is using an average baseline until more consistent logs are available.")
     if gamification.logged_days == 0:
         notes.append("Gamified insights need meal logs before streaks and badges become meaningful.")
