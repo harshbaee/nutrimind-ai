@@ -53,48 +53,58 @@
   --color-ink: var(--ink);
 }
 
+/* Theme "Ocean and lime", shared with the /preview page: a pale aqua ground, white sheets,
+   near-black ink, and the palette's hues deepened to text-safe data colours. */
 :root {
-  --radius: 0.75rem;
-  --background: oklch(0.982 0.006 245);
-  --foreground: oklch(0.18 0.025 260);
-  --card: oklch(1 0 0 / 74%);
-  --card-foreground: oklch(0.18 0.025 260);
-  --popover: oklch(1 0 0 / 94%);
-  --popover-foreground: oklch(0.18 0.025 260);
-  --primary: oklch(0.22 0.025 260);
-  --primary-foreground: oklch(0.985 0.005 240);
-  --secondary: oklch(0.955 0.011 250);
-  --secondary-foreground: oklch(0.22 0.025 260);
-  --muted: oklch(0.955 0.011 250);
-  --muted-foreground: oklch(0.52 0.025 257);
-  --accent: oklch(0.948 0.015 250);
-  --accent-foreground: oklch(0.22 0.025 260);
-  --destructive: oklch(0.62 0.22 25);
-  --destructive-foreground: oklch(0.985 0.005 240);
-  --border: oklch(0.91 0.014 255);
-  --input: oklch(0.91 0.014 255);
-  --ring: oklch(0.64 0.07 250);
+  --radius: 0.75rem; /* 12px cards, stepping down to 10 and 8 inside */
+  --background: #eef7fa;
+  --foreground: #0a0a0a;
+  --card: #ffffff;
+  --card-foreground: #0a0a0a;
+  --popover: #ffffff;
+  --popover-foreground: #0a0a0a;
+  --primary: #0a0a0a;
+  --primary-foreground: #ffffff;
+  --secondary: #e3f1f5;
+  --secondary-foreground: #0a0a0a;
+  --muted: #e3f1f5;
+  --muted-foreground: #46585e;
+  --accent: #dcedf2;
+  --accent-foreground: #0a0a0a;
+  --destructive: #d63c41;
+  --destructive-foreground: #ffffff;
+  --border: #d6e5ea;
+  --input: #c6d9df;
+  --ring: #1d7fa3;
 
-  --ink: oklch(0.18 0.025 260);
-  --health: oklch(0.65 0.16 155);
-  --intel: oklch(0.61 0.19 250);
-  --cost: oklch(0.72 0.17 60);
-  --ai: oklch(0.62 0.20 292);
-  --warn: oklch(0.66 0.22 25);
+  --ink: #0a0a0a;
+  --health: #4c8a1e; /* protein and nutrition: lime, deepened */
+  --intel: #1d7fa3; /* calories, goals and progress: ocean */
+  --cost: #d9434a; /* spending: coral, deepened */
+  --ai: #0f6a80; /* coach and forecasts: deep sea */
+  --warn: #c2410c;
+  --aqua: #c9e8f0; /* the palette's own tones, for surfaces */
+  --lime: #e8f5c8;
+  --salmon: #ffd9cc;
+  --coral: #ff5a5f;
+  /* Category tiles: a pale tint with the dark of its own hue as ink (all above 5:1). */
+  --aqua-ink: #0f5a75; /* calories */
+  --lime-ink: #3d6b16; /* protein */
+  --salmon-ink: #8f2a30; /* spending */
 
   --chart-1: var(--health);
   --chart-2: var(--intel);
   --chart-3: var(--cost);
   --chart-4: var(--ai);
   --chart-5: var(--warn);
-  --sidebar: oklch(0.98 0.006 245);
-  --sidebar-foreground: oklch(0.18 0.025 260);
-  --sidebar-primary: oklch(0.22 0.025 260);
-  --sidebar-primary-foreground: oklch(0.985 0.005 240);
-  --sidebar-accent: oklch(0.95 0.012 250);
-  --sidebar-accent-foreground: oklch(0.22 0.025 260);
-  --sidebar-border: oklch(0.91 0.014 255);
-  --sidebar-ring: oklch(0.64 0.07 250);
+  --sidebar: #eef7fa;
+  --sidebar-foreground: #0a0a0a;
+  --sidebar-primary: #0a0a0a;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #dcedf2;
+  --sidebar-accent-foreground: #0a0a0a;
+  --sidebar-border: #d6e5ea;
+  --sidebar-ring: #1d7fa3;
 }
 
 .dark {
@@ -128,49 +138,31 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
-    font-feature-settings: "ss01", "cv11", "tnum";
+    font-family: "General Sans", system-ui, sans-serif;
+    font-feature-settings: "tnum";
     -webkit-font-smoothing: antialiased;
-  }
-
-  body {
-    background-image:
-      linear-gradient(135deg, color-mix(in oklab, var(--intel) 8%, transparent), transparent 36%),
-      linear-gradient(215deg, color-mix(in oklab, var(--health) 8%, transparent), transparent 38%),
-      linear-gradient(180deg, oklch(0.992 0.004 245), oklch(0.955 0.014 250));
-    background-attachment: fixed;
   }
 }
 
 @layer utilities {
-  .glass {
-    background: color-mix(in oklab, white 74%, transparent);
-    backdrop-filter: saturate(180%) blur(22px);
-    -webkit-backdrop-filter: saturate(180%) blur(22px);
-    border: 1px solid color-mix(in oklab, var(--ink) 9%, transparent);
-    box-shadow:
-      0 1px 0 0 color-mix(in oklab, white 88%, transparent) inset,
-      0 10px 32px -22px color-mix(in oklab, var(--ink) 32%, transparent);
+  /* The display face from the preview page, for page titles, section titles and headline figures. */
+  .font-display {
+    font-family: "Gambarino", Georgia, serif;
+    font-weight: 400;
+    letter-spacing: -0.02em;
   }
 
+  /* Historic names kept so components need no edits: these are now flat sheets, no blur or shadow. */
+  .glass,
   .glass-strong {
-    background: color-mix(in oklab, white 88%, transparent);
-    backdrop-filter: saturate(180%) blur(26px);
-    -webkit-backdrop-filter: saturate(180%) blur(26px);
-    border: 1px solid color-mix(in oklab, var(--ink) 10%, transparent);
-    box-shadow:
-      0 1px 0 0 color-mix(in oklab, white 92%, transparent) inset,
-      0 16px 42px -26px color-mix(in oklab, var(--ink) 36%, transparent);
+    background: var(--card);
+    border: 1px solid var(--border);
   }
 
   .glass-dark {
-    background:
-      linear-gradient(180deg, color-mix(in oklab, var(--ink) 96%, transparent), color-mix(in oklab, var(--ink) 91%, transparent)),
-      linear-gradient(135deg, color-mix(in oklab, var(--intel) 28%, transparent), transparent 45%);
+    background: var(--ink);
     color: white;
-    border: 1px solid color-mix(in oklab, white 10%, transparent);
-    box-shadow:
-      0 1px 0 0 color-mix(in oklab, white 10%, transparent) inset,
-      0 24px 60px -30px color-mix(in oklab, var(--ink) 62%, transparent);
+    border: 1px solid var(--ink);
   }
 
   .bg-health-soft {
@@ -193,33 +185,30 @@
     background: color-mix(in oklab, var(--warn) 14%, white);
   }
 
+  /* Hover feedback on a flat sheet: the border darkens, nothing floats. */
   .lift {
-    transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+    transition: border-color 160ms ease;
   }
 
   .lift:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 16px 42px -28px color-mix(in oklab, var(--ink) 42%, transparent);
+    border-color: color-mix(in oklab, var(--ink) 28%, transparent);
   }
 
+  /* Loading placeholder: a flat tone that breathes. */
   .shimmer {
-    background: linear-gradient(
-      90deg,
-      color-mix(in oklab, var(--ink) 4%, transparent) 0%,
-      color-mix(in oklab, var(--ink) 9%, transparent) 50%,
-      color-mix(in oklab, var(--ink) 4%, transparent) 100%
-    );
-    background-size: 200% 100%;
-    animation: shimmer 1.6s linear infinite;
+    background: color-mix(in oklab, var(--ink) 6%, transparent);
+    animation: shimmer 1.4s ease-in-out infinite;
   }
 
   @keyframes shimmer {
-    0% {
-      background-position: 200% 0;
+    50% {
+      opacity: 0.55;
     }
+  }
 
-    100% {
-      background-position: -200% 0;
+  @media (prefers-reduced-motion: reduce) {
+    .shimmer {
+      animation: none;
     }
   }
 

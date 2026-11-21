@@ -18,3 +18,9 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+# taste-skill working files (direction sheet, inspector screenshots)
+.taste-skill/
+
+# Local Claude Code settings (hold an auth token)
+.claude/settings.json
+.claude/settings.local.json

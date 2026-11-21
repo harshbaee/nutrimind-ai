@@ -82,6 +82,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "twitter:site", content: "@Lovable" },
     ],
     links: [
+      // The site's two faces (Gambarino for display, General Sans for text), shared by every page.
+      { rel: "preconnect", href: "https://api.fontshare.com" },
+      { rel: "preconnect", href: "https://cdn.fontshare.com", crossOrigin: "anonymous" },
+      { rel: "stylesheet", href: "https://api.fontshare.com/v2/css?f[]=gambarino@400&display=swap" },
+      { rel: "stylesheet", href: "https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600&display=swap" },
       {
         rel: "stylesheet",
         href: appCss,
@@ -96,7 +101,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    // The preview page's head script adds a class here before hydration.
+    <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
       </head>
