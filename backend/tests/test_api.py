@@ -345,3 +345,37 @@ def test_goals_and_budget_can_be_updated():
     assert res.status_code == 200
     assert (res.json()["calorie_goal"], res.json()["protein_goal"], res.json()["budget_weekly"]) == (2600, 180, 70)
     assert lee.patch(f"/users/{USER_ID}", json={"calorie_goal": 1}).status_code == 403
+
+
+TINY_JPEG = "data:image/jpeg;base64,/9j/4AAQSkZJRg=="
+
+
+def test_photo_parsing_keeps_only_sensible_foods():
+    from services.photo import parse_foods
+    reply = 'Sure! ```json\n{"foods": [{"name": "Skyr", "grams": 200}, {"name": "", "grams": 50}, ' \
+            '{"name": "rice", "grams": -3}, {"name": "oats", "grams": "lots"}, {"name": "boulder", "grams": 90000}]}\n```'
+    assert parse_foods(reply) == [{"name": "Skyr", "grams": 200}]
+    assert parse_foods("I can't see any food.") == []
+    assert parse_foods('{"foods": "nope"}') == []
+
+
+def test_photo_needs_the_ai_model_and_a_real_image():
+    assert client.post("/food/photo", json={"image": TINY_JPEG}).status_code == 503  # no COACH_API_KEY in tests
+    assert client.post("/food/photo", json={"image": "data:text/html;base64,PGgxPg=="}).status_code == 422
+    assert client.post("/food/photo", json={"image": "https://example.com/meal.jpg"}).status_code == 422
+
+
+def test_photo_foods_are_matched_to_your_pantry(monkeypatch):
+    sent = []
+
+    class Reply(FakeReply):
+        def json(self):
+            return {"choices": [{"message": {"content": '{"foods": [{"name": "skyr", "grams": 250}, {"name": "dragon fruit", "grams": 120}]}'}}]}
+
+    use_ai_coach(monkeypatch, lambda url, **kw: sent.append(kw) or Reply())
+    foods = client.post("/food/photo", json={"image": TINY_JPEG}).json()["foods"]
+    skyr = next(p for p in client.get("/food/saved").json() if "Skyr" in p["name"])
+    assert foods[0] == {"name": "skyr", "grams": 250, "product_id": skyr["id"], "product_name": skyr["name"]}
+    assert foods[1]["product_id"] is None  # not in the pantry: shown, but not added
+    content = sent[-1]["json"]["messages"][0]["content"]
+    assert content[1] == {"type": "image_url", "image_url": {"url": TINY_JPEG}}

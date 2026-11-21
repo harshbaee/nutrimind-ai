@@ -7,7 +7,8 @@ import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database.database import get_db
 from models.models import Product
-from schemas import ProductCreate, ProductPriceUpdate, ProductResponse, ProductUpdate
+from schemas import MealPhoto, ProductCreate, ProductPriceUpdate, ProductResponse, ProductUpdate
+from services.photo import recognise_meal, vision_model
 
 router = APIRouter()
 
@@ -113,6 +114,17 @@ def get_by_barcode(barcode: str, db: Session = Depends(get_db)):
         raise openfoodfacts_error(e)
     except Exception as e:
         raise openfoodfacts_error(e)
+
+@router.post("/photo")
+def recognise_photo(body: MealPhoto, request: Request, db: Session = Depends(get_db)):
+    """Foods recognised in a meal photo by your AI model, each matched to your pantry where possible."""
+    if not vision_model():
+        raise HTTPException(status_code=503, detail="Photo recognition needs the AI model set up (COACH_API_KEY and COACH_MODEL).")
+    foods = recognise_meal(db, request.state.user.id, body.image)
+    if foods is None:
+        raise HTTPException(status_code=502, detail="The AI model didn't answer. Try again, or add the foods by hand.")
+    return {"foods": foods}
+
 
 @router.get("/saved", response_model=list[ProductResponse])
 def saved_products(

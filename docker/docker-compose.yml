@@ -23,6 +23,7 @@ services:
       COACH_API_KEY: ${COACH_API_KEY:-}
       COACH_MODEL: ${COACH_MODEL:-}
       COACH_API_BASE_URL: ${COACH_API_BASE_URL:-http://host.docker.internal:20128/v1}
+      VISION_MODEL: ${VISION_MODEL:-}
     ports:
       - "8000:8000"
     depends_on:

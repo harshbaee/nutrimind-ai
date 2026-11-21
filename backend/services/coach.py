@@ -36,6 +36,23 @@ def coach_model() -> str | None:
     return os.getenv("COACH_MODEL") if os.getenv("COACH_API_KEY") else None
 
 
+def ai_chat(messages: list[dict], model: str) -> str | None:
+    """One chat completion from the OpenAI-compatible endpoint (OmniRoute by default); None on any failure."""
+    url = os.getenv("COACH_API_BASE_URL", "http://localhost:20128/v1").rstrip("/") + "/chat/completions"
+    try:
+        res = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {os.environ['COACH_API_KEY']}"},
+            json={"model": model, "messages": messages},
+            timeout=45,  # a combo may try several providers before one answers
+        )
+        res.raise_for_status()
+        return (res.json()["choices"][0]["message"]["content"] or "").strip() or None
+    except (requests.RequestException, ValueError, KeyError, IndexError, TypeError) as exc:
+        log.warning("AI call failed (%s); the caller falls back", type(exc).__name__)
+        return None
+
+
 def ask_ai(prompt: str) -> str | None:
     """The AI model's reply from an OpenAI-compatible endpoint (OmniRoute by default), or None when
     COACH_API_KEY / COACH_MODEL are unset or the call fails, so callers keep the rule-based text."""
@@ -44,22 +61,7 @@ def ask_ai(prompt: str) -> str | None:
         return None
     if prompt in _ai_cache:
         return _ai_cache[prompt]
-    url = os.getenv("COACH_API_BASE_URL", "http://localhost:20128/v1").rstrip("/") + "/chat/completions"
-    try:
-        res = requests.post(
-            url,
-            headers={"Authorization": f"Bearer {os.environ['COACH_API_KEY']}"},
-            json={
-                "model": model,
-                "messages": [{"role": "system", "content": COACH_SYSTEM}, {"role": "user", "content": prompt}],
-            },
-            timeout=45,  # a combo may try several providers before one answers
-        )
-        res.raise_for_status()
-        text = (res.json()["choices"][0]["message"]["content"] or "").strip()
-    except (requests.RequestException, ValueError, KeyError, IndexError, TypeError) as exc:
-        log.warning("AI coach call failed (%s), using the rule-based text", type(exc).__name__)
-        return None
+    text = ai_chat([{"role": "system", "content": COACH_SYSTEM}, {"role": "user", "content": prompt}], model)
     if not text:
         return None
     if len(_ai_cache) > 256:

@@ -44,6 +44,11 @@ class LoginRequest(BaseModel):
     _email = field_validator("email")(normalise_email)
 
 
+class MealPhoto(BaseModel):
+    # A browser data URL; ~6 MB of base64 is a 4.5 MB photo, far more than the 1024 px JPEG the app sends.
+    image: str = Field(max_length=6_000_000, pattern=r"^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$")
+
+
 class PasswordChange(BaseModel):
     current_password: str = Field(min_length=1, max_length=128)
     new_password: str = Field(min_length=8, max_length=128)

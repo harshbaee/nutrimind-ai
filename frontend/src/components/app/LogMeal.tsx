@@ -41,6 +41,22 @@ export function LogMeal({ dialog, userId }: { dialog: RefObject<HTMLDialogElemen
     onError: (e: Error) => toast.error(`Couldn't log that meal again. ${e.message}`),
   });
 
+  // A meal photo: the AI model names the foods and guesses grams; pantry matches land on the receipt to check.
+  const [notInPantry, setNotInPantry] = useState<string[]>([]);
+  const photo = useMutation({
+    mutationFn: async (file: File) => api.mealPhoto(await shrinkPhoto(file)),
+    onSuccess: ({ foods: seen }) => {
+      const matched = seen.filter((f) => f.product_id !== null);
+      setItems((prev) => [...prev, ...matched.map((f) => ({ product_id: f.product_id!, quantity_g: f.grams }))]);
+      setNotInPantry(seen.filter((f) => f.product_id === null).map((f) => f.name));
+      toast[matched.length ? "success" : "info"](
+        matched.length ? `Added ${matched.length} ${matched.length === 1 ? "food" : "foods"} from the photo. Check the amounts.` : "No foods from your pantry in that photo.",
+      );
+    },
+    onError: (e: Error) =>
+      toast.error(e.message.startsWith("503") ? "Photo recognition isn't set up yet. Add the AI model's key first." : `Couldn't read the photo. ${e.message}`),
+  });
+
   const lines = items.map((it, i) => {
     const f = foods.find((p) => p.id === it.product_id);
     const cost = f?.estimated_price_eur && f.serving_size_g ? (f.estimated_price_eur / f.serving_size_g) * it.quantity_g : null;
@@ -71,6 +87,27 @@ export function LogMeal({ dialog, userId }: { dialog: RefObject<HTMLDialogElemen
             ))}
           </ul>
         </section>
+      ) : null}
+
+      <p className="na-sub">
+        <label className="na-text-btn">
+          {photo.isPending ? "Reading the photo…" : "From a photo"}
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="sr-only"
+            disabled={photo.isPending}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = ""; // lets the same photo be picked again
+              if (file) photo.mutate(file);
+            }}
+          />
+        </label>
+      </p>
+      {notInPantry.length ? (
+        <p className="na-caption">Not in your pantry, so not added: {notInPantry.join(", ")}. Add them on the Pantry screen first.</p>
       ) : null}
 
       <form
@@ -140,4 +177,16 @@ export function LogMeal({ dialog, userId }: { dialog: RefObject<HTMLDialogElemen
       </button>
     </dialog>
   );
+}
+
+// Phone photos are several MB; 1024 px on the long side is plenty to recognise food and keeps the upload small.
+async function shrinkPhoto(file: File, longSide = 1024): Promise<string> {
+  const image = await createImageBitmap(file);
+  const scale = Math.min(1, longSide / Math.max(image.width, image.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(image.width * scale);
+  canvas.height = Math.round(image.height * scale);
+  canvas.getContext("2d")!.drawImage(image, 0, 0, canvas.width, canvas.height);
+  image.close();
+  return canvas.toDataURL("image/jpeg", 0.8);
 }

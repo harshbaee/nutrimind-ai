@@ -62,9 +62,12 @@ AI coach: add these to `.env` and the coach's answers and daily headline are wri
 COACH_API_KEY=your-omniroute-key
 COACH_MODEL=your-combo-name
 # COACH_API_BASE_URL=http://localhost:20128/v1   (the default)
+# VISION_MODEL=a-combo-that-reads-images        (for meal photos; defaults to COACH_MODEL)
 ```
 
 That sends your goals, today's meals and saved foods to the models behind that endpoint. Without a key, or if a call fails, the coach uses its rule-based text.
+
+Meal photos ("From a photo" in Log a meal) go to the same endpoint, so `VISION_MODEL` (or `COACH_MODEL`) must be able to read images. The model names the foods and estimates grams; foods in your pantry are added to the meal for you to check, the rest are listed.
 
 To use PostgreSQL instead, put `DATABASE_URL=postgresql://user:pass@localhost:5432/nutrimind` in `.env` at the repo root, then run the seed script (it creates the tables).
 
