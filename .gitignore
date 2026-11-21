@@ -24,3 +24,7 @@ Thumbs.db
 # Local Claude Code settings (hold an auth token)
 .claude/settings.json
 .claude/settings.local.json
+
+# Trained model files ship as GitHub Release assets, not commits
+ml/models/
+ml/data/
