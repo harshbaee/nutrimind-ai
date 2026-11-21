@@ -1,0 +1,3 @@
+# Files read inside Linux containers must keep LF endings
+docker/** text eol=lf
+*.sh text eol=lf
